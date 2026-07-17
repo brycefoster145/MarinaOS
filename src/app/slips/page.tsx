@@ -8,7 +8,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { InteractiveSlipMap } from "@/components/slips/interactive-slip-map";
 import { SlipListView } from "@/components/slips/slip-list-view";
 import { ReservationCalendar, NewReservationModal } from "@/components/slips/reservation-manager";
-import { Anchor, Map, Table2, Calendar, Plus, Ship } from "lucide-react";
+import { SatelliteDockDetection } from "@/components/slips/satellite-dock-detection";
+import { Anchor, Map, Table2, Calendar, Plus, Ship, Satellite } from "lucide-react";
 
 // Sample data
 const sampleDocks = [
@@ -118,6 +119,10 @@ export default function SlipsPage() {
               <Calendar className="h-4 w-4 mr-2" />
               Calendar
             </TabsTrigger>
+            <TabsTrigger value="satellite">
+              <Satellite className="h-4 w-4 mr-2" />
+              Satellite
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="map" className="mt-6">
@@ -163,6 +168,23 @@ export default function SlipsPage() {
                 onCheckOut={(id) => console.log("Check out:", id)}
                 onCancel={(id) => console.log("Cancel:", id)}
               />
+            </GlassCard>
+          </TabsContent>
+
+          <TabsContent value="satellite" className="mt-6">
+            <GlassCard className="p-5" hover={false}>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 to-accent/20">
+                  <Satellite className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-semibold">Satellite Dock Detection</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Use satellite imagery and AI to detect and configure docks
+                  </p>
+                </div>
+              </div>
+              <SatelliteDockDetection />
             </GlassCard>
           </TabsContent>
         </Tabs>
