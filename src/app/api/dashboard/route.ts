@@ -202,6 +202,19 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    // Calculate occupancy change vs last month
+    const prevMonthOccupied = await prisma.slip.count({
+      where: {
+        organizationId,
+        isActive: true,
+        status: { in: ["OCCUPIED", "RESERVED"] },
+      },
+    });
+    const occupancyChange =
+      totalSlips > 0
+        ? Math.round(((occupiedSlips - prevMonthOccupied) / totalSlips) * 100)
+        : 0;
+
     return apiSuccess({
       stats: {
         occupancyRate: {
