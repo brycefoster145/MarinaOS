@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { slugify } from "@/lib/utils";
 import { apiSuccess, apiError } from "@/lib/api";
 
+export const dynamic = "force-dynamic";
+
 interface DockInput {
   name: string;
   color?: string;
