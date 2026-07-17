@@ -1,11 +1,11 @@
 import { NextRequest } from "next/server";
-import prisma from "@/lib/prisma";
 import { apiSuccess, apiError, getOrganizationId } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
+    const { default: prisma } = await import("@/lib/prisma");
     const orgId = getOrganizationId(req);
 
     // For now, if no org header, use the first available org (dev mode)
@@ -147,7 +147,7 @@ export async function GET(req: NextRequest) {
       severity: "low" | "medium" | "high";
     }> = [];
 
-    // Low fuel alert — fetch all active tanks and filter in code
+    // Low fuel alert
     const allFuelTanks = await prisma.fuelInventory.findMany({
       where: { organizationId, isActive: true },
     });
@@ -202,22 +202,6 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Calculate occupancy change vs last month
-    const prevMonthOccupied = await prisma.slip.count({
-      where: {
-        organizationId,
-        isActive: true,
-        status: { in: ["OCCUPIED", "RESERVED"] },
-      },
-    });
-    const occupancyChange =
-      totalSlips > 0
-        ? Math.round(((occupiedSlips - prevMonthOccupied) / totalSlips) * 100)
-        : 0;
-
-    // Previous month customer count (simplified)
-    const prevCustomerCount = activeCustomers; // simplified
-
     return apiSuccess({
       stats: {
         occupancyRate: {
@@ -260,6 +244,7 @@ export async function GET(req: NextRequest) {
 
 async function getFirstOrgId(): Promise<string | null> {
   try {
+    const { default: prisma } = await import("@/lib/prisma");
     const org = await prisma.organization.findFirst({
       select: { id: true },
       orderBy: { createdAt: "asc" },
