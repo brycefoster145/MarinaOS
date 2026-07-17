@@ -1,7 +1,6 @@
-import { NextRequest } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { apiSuccess, apiError } from "@/lib/api";
+import { NextRequest, NextResponse } from "next/server";
 import { slugify } from "@/lib/utils";
+import { apiSuccess, apiError } from "@/lib/api";
 
 interface DockInput {
   name: string;
@@ -28,43 +27,32 @@ interface StorageRackInput {
 }
 
 interface OnboardingBody {
-  // Marina info
   marinaName: string;
   email: string;
   phone?: string;
   website?: string;
-
-  // Location
   address?: string;
   city?: string;
   state?: string;
   zipCode?: string;
   country?: string;
-
-  // Docks & Slips
   docks: DockInput[];
-
-  // Features
   hasFuelDock: boolean;
   fuelPrices?: {
     gasoline?: FuelPriceInput;
     diesel?: FuelPriceInput;
     premiumGasoline?: FuelPriceInput;
   };
-
   hasDryStorage: boolean;
   storageRacks?: StorageRackInput[];
-
-  // Settings
   timezone?: string;
   currency?: string;
-
-  // Terms
   agreeTerms: boolean;
 }
 
 export async function POST(req: NextRequest) {
   try {
+    const { prisma } = await import("@/lib/prisma");
     const body: OnboardingBody = await req.json();
 
     // === Validation ===
@@ -85,7 +73,7 @@ export async function POST(req: NextRequest) {
     let slug = slugify(body.marinaName);
     if (!slug) slug = "marina";
 
-    // Ensure slug uniqueness by appending a suffix if needed
+    // Ensure slug uniqueness
     const existing = await prisma.organization.findUnique({ where: { slug } });
     if (existing) {
       const suffix = Math.random().toString(36).substring(2, 6);
@@ -109,7 +97,6 @@ export async function POST(req: NextRequest) {
         country: body.country || "US",
         plan: "TRIAL",
         trialEndsAt,
-        // Create default admin user
         users: {
           create: {
             email: body.email.trim(),
@@ -118,7 +105,6 @@ export async function POST(req: NextRequest) {
             isActive: true,
           },
         },
-        // Create settings
         settings: {
           create: {
             timezone: body.timezone || "America/New_York",
@@ -144,25 +130,18 @@ export async function POST(req: NextRequest) {
 
     // === Create Docks & Slips ===
     const dockColors = [
-      "#0284c7",
-      "#059669",
-      "#d97706",
-      "#7c3aed",
-      "#dc2626",
-      "#0891b2",
-      "#65a30d",
-      "#0d9488",
+      "#0284c7", "#059669", "#d97706", "#7c3aed",
+      "#dc2626", "#0891b2", "#65a30d", "#0d9488",
     ];
 
     let totalSlipCount = 0;
-    let createdDocks: { id: string; name: string; slipCount: number }[] = [];
+    const createdDocks: { id: string; name: string; slipCount: number }[] = [];
 
     for (let i = 0; i < body.docks.length; i++) {
       const dockInput = body.docks[i];
       const dockName = dockInput.name.trim() || `Dock ${String.fromCharCode(65 + i)}`;
       const color = dockInput.color || dockColors[i % dockColors.length];
 
-      // Create dock
       const dock = await prisma.dock.create({
         data: {
           organizationId: organization.id,
@@ -173,7 +152,6 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // Create slips for this dock
       const slipCount = Math.max(1, dockInput.slipCount);
       const slipsData = [];
 
@@ -196,7 +174,6 @@ export async function POST(req: NextRequest) {
           monthlyRate: dockInput.monthlyRate,
           annualRate: dockInput.annualRate || null,
           isActive: true,
-          // Position slips in a row layout
           positionX: (s - 1) * 60,
           positionY: i * 80,
           widthPixels: 55,
@@ -206,10 +183,10 @@ export async function POST(req: NextRequest) {
 
       await prisma.slip.createMany({ data: slipsData });
       totalSlipCount += slipCount;
-      createdDocks.push({ id: dock.id, name: dockName, slipCount: slipCount });
+      createdDocks.push({ id: dock.id, name: dockName, slipCount });
     }
 
-    // === Create Fuel Inventory (if enabled) ===
+    // === Create Fuel Inventory ===
     if (body.hasFuelDock && body.fuelPrices) {
       const fuelEntries = [];
 
@@ -263,7 +240,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // === Create Dry Storage Racks (if enabled) ===
+    // === Create Dry Storage Racks ===
     if (body.hasDryStorage && body.storageRacks?.length) {
       const rackData = body.storageRacks.map((rack) => ({
         organizationId: organization.id,
