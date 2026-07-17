@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import "@/styles/globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
-import { ClerkThemeProvider } from "@/components/auth/clerk-provider";
 import { Toaster } from "sonner";
+import { ClerkProvider } from "@clerk/nextjs";
+import { dark } from "@clerk/themes";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -51,30 +52,74 @@ export const metadata: Metadata = {
   },
 };
 
+const clerkAppearance = {
+  baseTheme: dark,
+  variables: {
+    colorPrimary: "hsl(199, 89%, 48%)",
+    colorText: "hsl(0, 0%, 95%)",
+    colorBackground: "hsl(222, 47%, 6%)",
+    colorInputBackground: "hsl(217, 33%, 9%)",
+    colorInputText: "hsl(0, 0%, 95%)",
+    borderRadius: "0.75rem",
+    fontFamily: "var(--font-sans)",
+  },
+  elements: {
+    card: "shadow-xl border border-border bg-background",
+    headerTitle: "text-2xl font-display font-bold",
+    headerSubtitle: "text-muted-foreground",
+    formButtonPrimary: "bg-primary text-primary-foreground hover:bg-primary/90 rounded-xl h-10 px-5",
+    formFieldInput: "rounded-xl border-border bg-background h-10",
+    footerActionLink: "text-primary hover:text-primary/80",
+    dividerLine: "bg-border",
+    dividerText: "text-muted-foreground",
+    socialButtonsBlockButton: "rounded-xl border-border hover:bg-secondary",
+    socialButtonsBlockButtonText: "text-foreground",
+    formFieldLabel: "text-foreground",
+    otpCodeFieldInput: "rounded-xl border-border",
+    alert: "rounded-xl",
+  },
+};
+
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const isClerkConfigured = publishableKey &&
+    publishableKey !== "pk_test_placeholder" &&
+    publishableKey.length > 20;
+
+  const content = (
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="dark"
+      enableSystem
+      disableTransitionOnChange
+    >
+      {children}
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          className: "glass-card",
+        }}
+      />
+    </ThemeProvider>
+  );
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.variable} ${jakarta.variable} font-sans`}>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="dark"
-          enableSystem
-          disableTransitionOnChange
-        >
-          <ClerkThemeProvider>
-            {children}
-          </ClerkThemeProvider>
-          <Toaster
-            position="top-right"
-            toastOptions={{
-              className: "glass-card",
-            }}
-          />
-        </ThemeProvider>
+        {isClerkConfigured ? (
+          <ClerkProvider
+            publishableKey={publishableKey!}
+            appearance={clerkAppearance}
+          >
+            {content}
+          </ClerkProvider>
+        ) : (
+          content
+        )}
       </body>
     </html>
   );
