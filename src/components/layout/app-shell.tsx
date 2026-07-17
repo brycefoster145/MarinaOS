@@ -5,7 +5,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { TopBar } from "@/components/layout/topbar";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
-import { AuthGuard } from "@/components/auth/auth-guard";
+import { DynamicAuthGuard } from "@/components/auth/dynamic-auth-guard";
 import { TrialBanner, useTrialStatus } from "@/components/billing/trial-banner";
 
 interface AppShellProps {
@@ -18,7 +18,7 @@ export function AppShell({ children }: AppShellProps) {
   const trial = useTrialStatus();
 
   return (
-    <AuthGuard>
+    <DynamicAuthGuard>
       <div className="min-h-screen bg-background">
         {/* Trial Banner */}
         <TrialBanner daysRemaining={trial.daysRemaining} plan={trial.plan} />
@@ -63,6 +63,6 @@ export function AppShell({ children }: AppShellProps) {
           </main>
         </div>
       </div>
-    </AuthGuard>
+    </DynamicAuthGuard>
   );
 }
