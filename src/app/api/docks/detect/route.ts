@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import prisma from "@/lib/prisma";
 import { apiSuccess, apiError, getOrganizationId } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +20,7 @@ interface DockInput {
 
 export async function POST(req: NextRequest) {
   try {
+    const { default: prisma } = await import("@/lib/prisma");
     const orgId = getOrganizationId(req);
 
     // Dev mode: use first org
