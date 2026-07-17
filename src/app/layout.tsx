@@ -6,6 +6,8 @@ import { Toaster } from "sonner";
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 
+export const dynamic = "force-dynamic";
+
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-sans",
