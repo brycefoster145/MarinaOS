@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { InteractiveSlipMap } from "@/components/slips/interactive-slip-map";
 import { SlipListView } from "@/components/slips/slip-list-view";
 import { ReservationCalendar, NewReservationModal } from "@/components/slips/reservation-manager";
-import { SatelliteDockDetection } from "@/components/slips/satellite-dock-detection";
+import { SatelliteDockDetection } from "@/components/slips/satellite-map";
 import { Anchor, Map, Table2, Calendar, Plus, Ship, Satellite } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -143,6 +143,17 @@ export default function SlipsPage() {
 
           <TabsContent value="satellite" className="mt-6">
             <GlassCard className="p-5" hover={false}>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 to-accent/20">
+                  <Satellite className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-semibold">Satellite Dock Detection</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Real Mapbox satellite imagery with AI-powered dock detection
+                  </p>
+                </div>
+              </div>
               <SatelliteDockDetection />
             </GlassCard>
           </TabsContent>
