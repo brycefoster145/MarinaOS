@@ -280,7 +280,11 @@ export default function OnboardingPage() {
     }
   };
 
-  
+ const handleNext = async () => {
+    if (currentStep === 0) { setCurrentStep(1); return; }
+    if (currentStep === 1) { setCurrentStep(5); return; }
+    if (currentStep === 5) { await handleSubmit(); }
+  }; 
 
  const handleBack = () => {
     if (currentStep > 0) {
