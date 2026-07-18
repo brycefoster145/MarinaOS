@@ -91,6 +91,10 @@ export default function OnboardingPage() {
                     Get Started <ArrowRight className="h-4 w-4 ml-2" />
                   </Button>
                 </div>
+                  <p className="text-xs text-muted-foreground pt-2">
+                    Already have an account?{" "}
+                    <a href="/sign-in" className="text-primary hover:underline font-medium">Sign in</a>
+                  </p>
               )}
 
               {/* Marina Info */}
