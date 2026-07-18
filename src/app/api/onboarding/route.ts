@@ -64,9 +64,6 @@ export async function POST(req: NextRequest) {
     if (!body.email?.trim()) {
       return apiError("Email is required");
     }
-    if (!body.docks?.length) {
-      return apiError("At least one dock is required");
-    }
     if (!body.agreeTerms) {
       return apiError("You must agree to the terms of service");
     }
@@ -136,11 +133,18 @@ export async function POST(req: NextRequest) {
       "#dc2626", "#0891b2", "#65a30d", "#0d9488",
     ];
 
+    // Auto-create default docks if none provided (simplified onboarding)
+    const docksToCreate = body.docks?.length ? body.docks : [
+      { name: "Alpha Dock", slipCount: 10, slipPrefix: "A", slipLength: 50, slipWidth: 16, dailyRate: 3.5, monthlyRate: 85 },
+      { name: "Bravo Dock", slipCount: 8, slipPrefix: "B", slipLength: 60, slipWidth: 18, dailyRate: 4.0, monthlyRate: 100 },
+      { name: "Charlie Dock", slipCount: 6, slipPrefix: "C", slipLength: 40, slipWidth: 14, dailyRate: 3.0, monthlyRate: 75 },
+    ];
+
     let totalSlipCount = 0;
     const createdDocks: { id: string; name: string; slipCount: number }[] = [];
 
-    for (let i = 0; i < body.docks.length; i++) {
-      const dockInput = body.docks[i];
+    for (let i = 0; i < docksToCreate.length; i++) {
+      const dockInput = docksToCreate[i];
       const dockName = dockInput.name.trim() || `Dock ${String.fromCharCode(65 + i)}`;
       const color = dockInput.color || dockColors[i % dockColors.length];
 
