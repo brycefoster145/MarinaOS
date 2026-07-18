@@ -283,12 +283,8 @@ export default function OnboardingPage() {
   const handleNext = async () => {
     if (currentStep < steps.length - 1) {
       // Skip fuel/storage config if not enabled
-      if (currentStep === 3) {
-        if (!form.hasFuelDock && !form.hasDryStorage) {
-          setCurrentStep(5); // Skip to review
-          return;
-        }
-      }
+     if (currentStep === 1) { setCurrentStep(5); return; }
+
       if (currentStep === 4) {
         // Both fuel and storage are shown on this step
         // Only skip if both disabled (already handled above)
