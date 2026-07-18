@@ -57,7 +57,7 @@ const STAT_ICONS = [
   <Anchor key="occupancy" className="h-4 w-4" />,
   <Users key="customers" className="h-4 w-4" />,
   <DollarSign key="revenue" className="h-4 w-4" />,
-  <Activity key="ai" className="h-4 w-4" />,
+ 
 ];
 
 const ALERT_ICONS: Record<string, React.ReactNode> = {
@@ -151,7 +151,7 @@ export default function DashboardPage() {
         { label: "Occupancy Rate", value: stats.occupancyRate.display, change: stats.occupancyRate.change, changeType: stats.occupancyRate.changeType, icon: STAT_ICONS[0] },
         { label: "Active Customers", value: stats.activeCustomers.display, change: stats.activeCustomers.change, changeType: stats.activeCustomers.changeType, icon: STAT_ICONS[1] },
         { label: "Monthly Revenue", value: stats.monthlyRevenue.display, change: stats.monthlyRevenue.change, changeType: stats.monthlyRevenue.changeType, icon: STAT_ICONS[2] },
-        { label: "AI Automation", value: stats.aiAutomation.display, change: stats.aiAutomation.change, changeType: stats.aiAutomation.changeType, icon: STAT_ICONS[3] },
+        
       ]
     : [];
 
