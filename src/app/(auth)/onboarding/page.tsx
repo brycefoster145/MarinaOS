@@ -434,7 +434,7 @@ export default function OnboardingPage() {
             </div>
             <div className="text-center">
               <p className="text-xs text-muted-foreground">
-                Step {currentStep} of {steps.length - 2}
+                
               </p>
             </div>
           </div>
