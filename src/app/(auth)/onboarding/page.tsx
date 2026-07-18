@@ -121,9 +121,7 @@ const DOCK_COLORS = ["#0284c7", "#059669", "#d97706", "#7c3aed", "#dc2626", "#08
 const steps = [
   { id: "welcome", title: "Welcome", icon: Sparkles },
   { id: "marina", title: "Marina Details", icon: Building2 },
-  { id: "docks", title: "Docks & Slips", icon: Anchor },
-  { id: "location", title: "Location & Features", icon: MapPin },
-  { id: "config", title: "Configure", icon: Globe },
+ 
   { id: "review", title: "Review", icon: CreditCard },
   { id: "complete", title: "Complete", icon: Check },
 ];
@@ -280,30 +278,15 @@ export default function OnboardingPage() {
     }
   };
 
-  const handleNext = async () => {
-    if (currentStep < steps.length - 1) {
-      // Skip fuel/storage config if not enabled
-     if (currentStep === 1) { setCurrentStep(5); return; }
-
-      if (currentStep === 4) {
-        // Both fuel and storage are shown on this step
-        // Only skip if both disabled (already handled above)
-      }
-      setCurrentStep((prev) => prev + 1);
-    } else {
-      // Final step - call the API
-      await handleSubmit();
-    }
+   const handleNext = async () => {
+    if (currentStep === 0) { setCurrentStep(1); return; }
+    if (currentStep === 1) { setCurrentStep(2); return; }
+    if (currentStep === 2) { await handleSubmit(); }
   };
 
   const handleBack = () => {
     if (currentStep > 0) {
       setError(null);
-      // Go back but skip config if not needed
-      if (currentStep === 5 && !form.hasFuelDock && !form.hasDryStorage) {
-        setCurrentStep(3);
-        return;
-      }
       setCurrentStep((prev) => prev - 1);
     }
   };
