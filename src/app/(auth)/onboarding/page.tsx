@@ -121,7 +121,9 @@ const DOCK_COLORS = ["#0284c7", "#059669", "#d97706", "#7c3aed", "#dc2626", "#08
 const steps = [
   { id: "welcome", title: "Welcome", icon: Sparkles },
   { id: "marina", title: "Marina Details", icon: Building2 },
- 
+  { id: "docks", title: "", icon: Anchor },
+  { id: "location", title: "", icon: MapPin },
+  { id: "config", title: "", icon: Globe },
   { id: "review", title: "Review", icon: CreditCard },
   { id: "complete", title: "Complete", icon: Check },
 ];
@@ -278,15 +280,18 @@ export default function OnboardingPage() {
     }
   };
 
-   const handleNext = async () => {
-    if (currentStep === 0) { setCurrentStep(1); return; }
-    if (currentStep === 1) { setCurrentStep(2); return; }
-    if (currentStep === 2) { await handleSubmit(); }
-  };
-
-  const handleBack = () => {
+    const handleBack = () => {
     if (currentStep > 0) {
       setError(null);
+      if (currentStep === 5) { setCurrentStep(1); return; }
+      setCurrentStep((prev) => prev - 1);
+    }
+  };
+
+ const handleBack = () => {
+    if (currentStep > 0) {
+      setError(null);
+      if (currentStep === 5) { setCurrentStep(1); return; }
       setCurrentStep((prev) => prev - 1);
     }
   };
