@@ -280,13 +280,7 @@ export default function OnboardingPage() {
     }
   };
 
-    const handleBack = () => {
-    if (currentStep > 0) {
-      setError(null);
-      if (currentStep === 5) { setCurrentStep(1); return; }
-      setCurrentStep((prev) => prev - 1);
-    }
-  };
+  
 
  const handleBack = () => {
     if (currentStep > 0) {
