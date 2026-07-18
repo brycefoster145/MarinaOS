@@ -238,10 +238,10 @@ export async function GET(req: NextRequest) {
               : "+0%",
           changeType: monthlyRevenue >= prevRevenue ? ("positive" as const) : ("negative" as const),
         },
-        aiAutomation: {
-          value: 76,
-          display: "76%",
-          change: "+5.4%",
+       aiAutomation: {
+          value: 0,
+          display: "0%",
+          change: "0%",
           changeType: "positive" as const,
         },
       },
