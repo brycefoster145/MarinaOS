@@ -344,16 +344,22 @@ export function SatelliteDockDetection() {
     const centerLat = (minLat + maxLat) / 2;
     const centerLng = (minLng + maxLng) / 2;
 
+    const dockWidthM = Math.abs(lngDiff) * 111320 * Math.cos((centerLat * Math.PI) / 180);
+    const dockHeightM = Math.abs(latDiff) * 111320;
+    // Slips are ~4.5m (15ft) wide — fit them along the longer edge
+    const longerSide = Math.max(dockWidthM, dockHeightM);
+    const slipCount = Math.max(1, Math.round(longerSide / 4.5));
+
     const idx = docks.length;
     const newDock: DetectedDock = {
       id: genDockId(),
       name: `Dock ${String.fromCharCode(65 + idx)}`,
       lng: centerLng,
       lat: centerLat,
-      width: Math.abs(lngDiff) * 111320 * Math.cos((centerLat * Math.PI) / 180),
-      height: Math.abs(latDiff) * 111320,
+      width: dockWidthM,
+      height: dockHeightM,
       color: DOCK_COLORS[idx % DOCK_COLORS.length],
-      slipCount: Math.max(1, Math.floor(Math.abs(lngDiff) * 50000)),
+      slipCount,
       slipLength: 40,
       slipWidth: 14,
       dailyRate: 3.5,
