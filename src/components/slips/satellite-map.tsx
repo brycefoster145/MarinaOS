@@ -71,6 +71,15 @@ export function SatelliteDockDetection() {
   const [drawMode, setDrawMode] = useState(false);
   const [drawStart, setDrawStart] = useState<{ lng: number; lat: number } | null>(null);
   const [drawCurrent, setDrawCurrent] = useState<{ lng: number; lat: number } | null>(null);
+  // Refs for Mapbox event handlers to avoid stale closures
+  const drawModeRef = useRef(false);
+  const drawStartRef = useRef<{ lng: number; lat: number } | null>(null);
+  const drawCurrentRef = useRef<{ lng: number; lat: number } | null>(null);
+
+  // Keep refs in sync
+  useEffect(() => { drawModeRef.current = drawMode; }, [drawMode]);
+  useEffect(() => { drawStartRef.current = drawStart; }, [drawStart]);
+  useEffect(() => { drawCurrentRef.current = drawCurrent; }, [drawCurrent]);
 
   // Load Mapbox GL JS from CDN
   useEffect(() => {
@@ -131,14 +140,45 @@ export function SatelliteDockDetection() {
       map.addControl(new window.mapboxgl.ScaleControl(), "bottom-left");
 
       map.on("load", () => {
-        mapRef.current = map;
-        setMapError(null);
-      });
+              mapRef.current = map;
+              setMapError(null);
+            });
 
-      map.on("moveend", () => {
-        const center = map.getCenter();
-        setLngLat([center.lng, center.lat]);
-      });
+            map.on("moveend", () => {
+              const center = map.getCenter();
+              setLngLat([center.lng, center.lat]);
+            });
+
+            // Drawing handlers using Mapbox events
+                  map.on("mousedown", (e: any) => {
+                    if (!drawModeRef.current) return;
+                    e.originalEvent.preventDefault();
+                    map.dragPan.disable();
+                    const pt = { lng: e.lngLat.lng, lat: e.lngLat.lat };
+                    drawStartRef.current = pt;
+                    drawCurrentRef.current = pt;
+                    setDrawStart(pt);
+                    setDrawCurrent(pt);
+                  });
+
+                  map.on("mousemove", (e: any) => {
+                    if (!drawModeRef.current || !drawStartRef.current) return;
+                    const pt = { lng: e.lngLat.lng, lat: e.lngLat.lat };
+                    drawCurrentRef.current = pt;
+                    setDrawCurrent(pt);
+                  });
+
+                  map.on("mouseup", () => {
+                    if (!drawModeRef.current || !drawStartRef.current || !drawCurrentRef.current) {
+                      drawStartRef.current = null;
+                      drawCurrentRef.current = null;
+                      setDrawStart(null);
+                      setDrawCurrent(null);
+                      return;
+                    }
+                    finishDraw();
+                    map.dragPan.enable();
+                  });
     } catch (err) {
       console.error("Map init error:", err);
       setMapError("Failed to initialize map.");
@@ -291,44 +331,19 @@ export function SatelliteDockDetection() {
     }
   };
 
-  // Drawing handlers
-  const handleMapMouseDown = (e: React.MouseEvent) => {
-    if (!drawMode || !mapRef.current) return;
-    const rect = mapContainerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    const px = e.clientX - rect.left;
-    const py = e.clientY - rect.top;
-    const lngLat = pixelToLngLat(px, py);
-    if (!lngLat) return;
-
-    setDrawStart(lngLat);
-    setDrawCurrent(lngLat);
-  };
-
-  const handleMapMouseMove = (e: React.MouseEvent) => {
-    if (!drawMode || !drawStart || !mapRef.current) return;
-    const rect = mapContainerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    const px = e.clientX - rect.left;
-    const py = e.clientY - rect.top;
-    const lngLat = pixelToLngLat(px, py);
-    if (!lngLat) return;
-    setDrawCurrent(lngLat);
-  };
-
-  const handleMapMouseUp = () => {
-    if (!drawMode || !drawStart || !drawCurrent) {
+  const finishDraw = () => {
+    const start = drawStartRef.current;
+    const current = drawCurrentRef.current;
+    if (!start || !current) {
       setDrawStart(null);
       setDrawCurrent(null);
       return;
     }
 
-    const minLat = Math.min(drawStart.lat, drawCurrent.lat);
-    const maxLat = Math.max(drawStart.lat, drawCurrent.lat);
-    const minLng = Math.min(drawStart.lng, drawCurrent.lng);
-    const maxLng = Math.max(drawStart.lng, drawCurrent.lng);
+    const minLat = Math.min(start.lat, current.lat);
+    const maxLat = Math.max(start.lat, current.lat);
+    const minLng = Math.min(start.lng, current.lng);
+    const maxLng = Math.max(start.lng, current.lng);
 
     const latDiff = maxLat - minLat;
     const lngDiff = maxLng - minLng;
@@ -578,10 +593,6 @@ export function SatelliteDockDetection() {
               ref={mapContainerRef}
               className="relative"
               style={{ height: "520px", background: "#0a1628", cursor: drawMode ? "crosshair" : "grab" }}
-              onMouseDown={handleMapMouseDown}
-              onMouseMove={handleMapMouseMove}
-              onMouseUp={handleMapMouseUp}
-              onMouseLeave={handleMapMouseUp}
             >
               {!mapLoaded && (
                 <div className="absolute inset-0 flex items-center justify-center bg-[#0a1628]">
