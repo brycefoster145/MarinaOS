@@ -5,12 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Glasses, Crosshair, Save, Trash2, Satellite, Map, Loader2, RotateCcw, Search, Navigation, Pencil } from "lucide-react";
+import { toast } from "sonner";
 
 interface DetectedDock {
   id: string;
   name: string;
-  x: number;
-  y: number;
+  lng: number;
+  lat: number;
   width: number;
   height: number;
   color: string;
@@ -24,8 +25,8 @@ interface DetectedDock {
 
 interface MapSuggestion {
   name: string;
-  x: number;
-  y: number;
+  lng: number;
+  lat: number;
   width: number;
   height: number;
   color: string;
@@ -57,6 +58,7 @@ declare global {
 export function SatelliteDockDetection() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
+  const overlayRef = useRef<SVGSVGElement>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [docks, setDocks] = useState<DetectedDock[]>([]);
@@ -66,9 +68,9 @@ export function SatelliteDockDetection() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [searchQuery, setSearchQuery] = useState("Newport Beach, CA");
   const [lngLat, setLngLat] = useState<[number, number]>([-117.92, 33.62]);
-  const [drawing, setDrawing] = useState(false);
-  const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null);
-  const [drawEnd, setDrawEnd] = useState<{ x: number; y: number } | null>(null);
+  const [drawMode, setDrawMode] = useState(false);
+  const [drawStart, setDrawStart] = useState<{ lng: number; lat: number } | null>(null);
+  const [drawCurrent, setDrawCurrent] = useState<{ lng: number; lat: number } | null>(null);
 
   // Load Mapbox GL JS from CDN
   useEffect(() => {
@@ -94,7 +96,6 @@ export function SatelliteDockDetection() {
     document.head.appendChild(script);
 
     return () => {
-      // Cleanup
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -106,13 +107,13 @@ export function SatelliteDockDetection() {
   useEffect(() => {
     if (!mapLoaded || !mapContainerRef.current || mapRef.current) return;
     if (!window.mapboxgl) {
-      setMapError("Mapbox SDK not available. Using fallback view.");
+      setMapError("Mapbox SDK not available.");
       return;
     }
 
     const token = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
     if (!token || token === "placeholder") {
-      setMapError("Mapbox token not configured. Using satellite simulation.");
+      setMapError("Mapbox token not configured.");
       return;
     }
 
@@ -123,8 +124,6 @@ export function SatelliteDockDetection() {
         style: "mapbox://styles/mapbox/satellite-streets-v12",
         center: lngLat,
         zoom: 17,
-        pitch: 0,
-        bearing: 0,
         attributionControl: false,
       });
 
@@ -136,20 +135,68 @@ export function SatelliteDockDetection() {
         setMapError(null);
       });
 
-      map.on("error", (e: any) => {
-        console.error("Map error:", e);
-        setMapError("Map display issue. Some features may be limited.");
-      });
-
       map.on("moveend", () => {
         const center = map.getCenter();
         setLngLat([center.lng, center.lat]);
       });
     } catch (err) {
       console.error("Map init error:", err);
-      setMapError("Failed to initialize map. Using satellite simulation.");
+      setMapError("Failed to initialize map.");
     }
-  }, [mapLoaded, lngLat]);
+  }, [mapLoaded]);
+
+  // Reposition overlay when map moves
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const onMove = () => {
+      // Force re-render of dock positions
+      setDocks((prev) => [...prev]);
+    };
+
+    map.on("move", onMove);
+    return () => {
+      map.off("move", onMove);
+    };
+  }, [mapRef.current]);
+
+  // Convert lat/lng to pixel coordinates for SVG overlay
+  const lngLatToPixel = useCallback(
+    (lng: number, lat: number): { x: number; y: number } | null => {
+      const map = mapRef.current;
+      if (!map) return null;
+      const container = mapContainerRef.current;
+      if (!container) return null;
+
+      try {
+        const point = map.project([lng, lat]);
+        const rect = container.getBoundingClientRect();
+        return { x: point.x - rect.left, y: point.y - rect.top };
+      } catch {
+        return null;
+      }
+    },
+    []
+  );
+
+  // Convert pixel to lat/lng
+  const pixelToLngLat = useCallback(
+    (px: number, py: number): { lng: number; lat: number } | null => {
+      const map = mapRef.current;
+      const container = mapContainerRef.current;
+      if (!map || !container) return null;
+
+      try {
+        const rect = container.getBoundingClientRect();
+        const lngLat = map.unproject([px + rect.left, py + rect.top]);
+        return { lng: lngLat.lng, lat: lngLat.lat };
+      } catch {
+        return null;
+      }
+    },
+    []
+  );
 
   // Search location
   const handleSearch = async () => {
@@ -176,10 +223,32 @@ export function SatelliteDockDetection() {
     setIsDetecting(true);
 
     try {
-      // Capture current map view as image
-      let imageUrl: string | null = null;
-      if (mapRef.current) {
-        imageUrl = mapRef.current.getCanvas().toDataURL("image/png");
+      const map = mapRef.current;
+      const container = mapContainerRef.current;
+      if (!map || !container) return;
+
+      const canvas = map.getCanvas();
+      const rect = container.getBoundingClientRect();
+
+      // Resize image to max 800px wide to keep API call fast
+      let imageUrl = canvas.toDataURL("image/jpeg", 0.7);
+      const img = new window.Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject();
+        img.src = imageUrl;
+      });
+      // If image is wider than 800px, resize it
+      if (img.width > 800) {
+        const scale = 800 / img.width;
+        const resizedCanvas = document.createElement("canvas");
+        resizedCanvas.width = 800;
+        resizedCanvas.height = img.height * scale;
+        const ctx = resizedCanvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, resizedCanvas.width, resizedCanvas.height);
+          imageUrl = resizedCanvas.toDataURL("image/jpeg", 0.7);
+        }
       }
 
       const res = await fetch("/api/ai/detect-docks", {
@@ -189,12 +258,14 @@ export function SatelliteDockDetection() {
           imageUrl,
           latitude: lngLat[1],
           longitude: lngLat[0],
-          zoom: mapRef.current?.getZoom() || 17,
+          zoom: map.getZoom(),
+          mapWidth: rect.width,
+          mapHeight: rect.height,
         }),
       });
 
       const json = await res.json();
-      if (json.data?.suggestions) {
+      if (json.data?.suggestions && json.data.suggestions.length > 0) {
         const newDocks = json.data.suggestions.map((s: MapSuggestion) => ({
           id: genDockId(),
           ...s,
@@ -208,12 +279,91 @@ export function SatelliteDockDetection() {
           });
           return existing;
         });
+        toast.success(`Detected ${newDocks.length} docks via ${json.data.source || "AI"}`);
+      } else {
+        toast.error("No docks detected. Try drawing them manually.");
       }
     } catch (err) {
       console.error("Detection error:", err);
+      toast.error("Detection failed. Use Draw Dock to trace manually.");
     } finally {
       setIsDetecting(false);
     }
+  };
+
+  // Drawing handlers
+  const handleMapMouseDown = (e: React.MouseEvent) => {
+    if (!drawMode || !mapRef.current) return;
+    const rect = mapContainerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const lngLat = pixelToLngLat(px, py);
+    if (!lngLat) return;
+
+    setDrawStart(lngLat);
+    setDrawCurrent(lngLat);
+  };
+
+  const handleMapMouseMove = (e: React.MouseEvent) => {
+    if (!drawMode || !drawStart || !mapRef.current) return;
+    const rect = mapContainerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const lngLat = pixelToLngLat(px, py);
+    if (!lngLat) return;
+    setDrawCurrent(lngLat);
+  };
+
+  const handleMapMouseUp = () => {
+    if (!drawMode || !drawStart || !drawCurrent) {
+      setDrawStart(null);
+      setDrawCurrent(null);
+      return;
+    }
+
+    const minLat = Math.min(drawStart.lat, drawCurrent.lat);
+    const maxLat = Math.max(drawStart.lat, drawCurrent.lat);
+    const minLng = Math.min(drawStart.lng, drawCurrent.lng);
+    const maxLng = Math.max(drawStart.lng, drawCurrent.lng);
+
+    const latDiff = maxLat - minLat;
+    const lngDiff = maxLng - minLng;
+
+    // Require minimum size (about 20m at this latitude)
+    const minSize = 0.0001;
+    if (latDiff < minSize && lngDiff < minSize) {
+      setDrawStart(null);
+      setDrawCurrent(null);
+      return;
+    }
+
+    const centerLat = (minLat + maxLat) / 2;
+    const centerLng = (minLng + maxLng) / 2;
+
+    const idx = docks.length;
+    const newDock: DetectedDock = {
+      id: genDockId(),
+      name: `Dock ${String.fromCharCode(65 + idx)}`,
+      lng: centerLng,
+      lat: centerLat,
+      width: Math.abs(lngDiff) * 111320 * Math.cos((centerLat * Math.PI) / 180),
+      height: Math.abs(latDiff) * 111320,
+      color: DOCK_COLORS[idx % DOCK_COLORS.length],
+      slipCount: Math.max(1, Math.floor(Math.abs(lngDiff) * 50000)),
+      slipLength: 40,
+      slipWidth: 14,
+      dailyRate: 3.5,
+      monthlyRate: 85,
+    };
+
+    setDocks((prev) => [...prev, newDock]);
+    setSelectedDockId(newDock.id);
+    setDrawStart(null);
+    setDrawCurrent(null);
   };
 
   // Save to DB
@@ -255,6 +405,98 @@ export function SatelliteDockDetection() {
     setSelectedDockId(null);
   };
 
+  // Render dock overlays
+  const renderDockOverlay = () => {
+    const map = mapRef.current;
+    const container = mapContainerRef.current;
+    if (!map || !container) return null;
+
+    const rect = container.getBoundingClientRect();
+
+    return docks.map((dock) => {
+      const isSelected = selectedDockId === dock.id;
+      const topLeft = lngLatToPixel(dock.lng - dock.width / 2 / (111320 * Math.cos((dock.lat * Math.PI) / 180)), dock.lat + dock.height / 2 / 111320);
+      const bottomRight = lngLatToPixel(dock.lng + dock.width / 2 / (111320 * Math.cos((dock.lat * Math.PI) / 180)), dock.lat - dock.height / 2 / 111320);
+
+      if (!topLeft || !bottomRight) return null;
+
+      const w = bottomRight.x - topLeft.x;
+      const h = bottomRight.y - topLeft.y;
+
+      return (
+        <g key={dock.id}>
+          <rect
+            x={topLeft.x}
+            y={topLeft.y}
+            width={w}
+            height={h}
+            rx={4}
+            fill={dock.color}
+            fillOpacity={isSelected ? 0.6 : 0.35}
+            stroke={isSelected ? "#ffffff" : dock.color}
+            strokeWidth={isSelected ? 3 : 2}
+            className="cursor-pointer"
+            onClick={() => setSelectedDockId(dock.id)}
+          />
+          <text
+            x={topLeft.x + w / 2}
+            y={topLeft.y + h / 2 + 4}
+            textAnchor="middle"
+            fill="white"
+            fontSize={12}
+            fontWeight={700}
+            style={{ textShadow: "0 1px 3px rgba(0,0,0,0.8)" }}
+          >
+            {dock.name} ({dock.slipCount} slips)
+          </text>
+          {dock.confidence && (
+            <text
+              x={topLeft.x + w - 4}
+              y={topLeft.y - 4}
+              textAnchor="end"
+              fill="#a3e635"
+              fontSize={9}
+              style={{ textShadow: "0 1px 2px rgba(0,0,0,0.8)" }}
+            >
+              {(dock.confidence * 100).toFixed(0)}% match
+            </text>
+          )}
+        </g>
+      );
+    });
+  };
+
+  // Render drawing preview
+  const renderDrawPreview = () => {
+    if (!drawStart || !drawCurrent || !mapRef.current) return null;
+
+    const start = lngLatToPixel(drawStart.lng, drawStart.lat);
+    const current = lngLatToPixel(drawCurrent.lng, drawCurrent.lat);
+    if (!start || !current) return null;
+
+    const x = Math.min(start.x, current.x);
+    const y = Math.min(start.y, current.y);
+    const w = Math.abs(current.x - start.x);
+    const h = Math.abs(current.y - start.y);
+
+    if (w < 5 && h < 5) return null;
+
+    return (
+      <rect
+        x={x}
+        y={y}
+        width={w}
+        height={h}
+        rx={4}
+        fill="white"
+        fillOpacity={0.15}
+        stroke="white"
+        strokeWidth={2}
+        strokeDasharray="6,3"
+      />
+    );
+  };
+
   return (
     <div className="space-y-4">
       {/* Toolbar */}
@@ -274,14 +516,13 @@ export function SatelliteDockDetection() {
           </div>
           <div className="w-px h-6 bg-border mx-1" />
           <Button
-            variant={drawing ? "default" : "outline"}
+            variant={drawMode ? "default" : "outline"}
             size="sm"
-            onClick={() => setDrawing(!drawing)}
+            onClick={() => setDrawMode(!drawMode)}
           >
             <Pencil className="h-4 w-4 mr-1.5" />
-            {drawing ? "Drawing..." : "Draw Dock"}
+            {drawMode ? "Drawing..." : "Draw Dock"}
           </Button>
-          <div className="w-px h-6 bg-border mx-1" />
           <Button
             variant="outline"
             size="sm"
@@ -289,7 +530,7 @@ export function SatelliteDockDetection() {
             loading={isDetecting}
           >
             <Glasses className="h-4 w-4 mr-1.5" />
-            {isDetecting ? "AI Analyzing..." : "AI Detect Docks"}
+            {isDetecting ? "AI Analyzing..." : "AI Detect"}
           </Button>
         </div>
         <div className="flex items-center gap-2">
@@ -315,9 +556,9 @@ export function SatelliteDockDetection() {
               <div className="flex items-center gap-2">
                 <Satellite className="h-4 w-4 text-primary" />
                 <span className="text-sm font-medium">Satellite View</span>
-                {mapError && (
-                  <Badge variant="outline" className="text-[10px] text-yellow-500">
-                    Fallback mode
+                {drawMode && (
+                  <Badge variant="outline" className="text-[10px] text-primary border-primary/30">
+                    Draw Mode — Click & drag to create docks
                   </Badge>
                 )}
               </div>
@@ -330,52 +571,11 @@ export function SatelliteDockDetection() {
             <div
               ref={mapContainerRef}
               className="relative"
-              style={{ height: "520px", background: "#0a1628" }}
-              onMouseDown={(e) => {
-                if (!drawing || !mapRef.current) return;
-                const rect = mapContainerRef.current?.getBoundingClientRect();
-                if (!rect) return;
-                const x = e.clientX - rect.left;
-                const y = e.clientY - rect.top;
-                setDrawStart({ x, y });
-                setDrawEnd({ x, y });
-              }}
-              onMouseMove={(e) => {
-                if (!drawing || !drawStart || !mapRef.current) return;
-                const rect = mapContainerRef.current?.getBoundingClientRect();
-                if (!rect) return;
-                const x = e.clientX - rect.left;
-                const y = e.clientY - rect.top;
-                setDrawEnd({ x, y });
-              }}
-              onMouseUp={() => {
-                if (!drawing || !drawStart || !drawEnd || !mapRef.current) return;
-                const x = Math.min(drawStart.x, drawEnd.x);
-                const y = Math.min(drawStart.y, drawEnd.y);
-                const w = Math.abs(drawEnd.x - drawStart.x);
-                const h = Math.abs(drawEnd.y - drawStart.y);
-                if (w < 10 || h < 10) {
-                  setDrawStart(null);
-                  setDrawEnd(null);
-                  return;
-                }
-                const colorIdx = docks.length % DOCK_COLORS.length;
-                const newDock: DetectedDock = {
-                  id: genDockId(),
-                  name: `Dock ${String.fromCharCode(65 + docks.length)}`,
-                  x, y, width: w, height: h,
-                  color: DOCK_COLORS[colorIdx],
-                  slipCount: 4,
-                  slipLength: 40,
-                  slipWidth: 14,
-                  dailyRate: 3.5,
-                  monthlyRate: 75,
-                };
-                setDocks((prev) => [...prev, newDock]);
-                setDrawStart(null);
-                setDrawEnd(null);
-                setDrawing(false);
-              }}
+              style={{ height: "520px", background: "#0a1628", cursor: drawMode ? "crosshair" : "grab" }}
+              onMouseDown={handleMapMouseDown}
+              onMouseMove={handleMapMouseMove}
+              onMouseUp={handleMapMouseUp}
+              onMouseLeave={handleMapMouseUp}
             >
               {!mapLoaded && (
                 <div className="absolute inset-0 flex items-center justify-center bg-[#0a1628]">
@@ -396,72 +596,18 @@ export function SatelliteDockDetection() {
                 </div>
               )}
 
-              {/* Overlay dock markers when map is loaded */}
-              {mapLoaded && !mapError && (docks.length > 0 || (drawing && drawStart && drawEnd)) && (
-                <div className="absolute inset-0 pointer-events-none z-10">
-                  <svg className="w-full h-full">
-                    {docks.map((dock) => {
-                      const isSelected = selectedDockId === dock.id;
-                      return (
-                        <g key={dock.id}>
-                          <rect
-                            x={dock.x}
-                            y={dock.y}
-                            width={dock.width}
-                            height={dock.height}
-                            rx={4}
-                            fill={dock.color}
-                            fillOpacity={isSelected ? 0.6 : 0.35}
-                            stroke={isSelected ? "#ffffff" : dock.color}
-                            strokeWidth={isSelected ? 3 : 2}
-                            className="pointer-events-auto cursor-pointer"
-                            onClick={() => setSelectedDockId(dock.id)}
-                          />
-                          <text
-                            x={dock.x + dock.width / 2}
-                            y={dock.y + dock.height / 2 + 4}
-                            textAnchor="middle"
-                            fill="white"
-                            fontSize={12}
-                            fontWeight={700}
-                            className="pointer-events-none"
-                            style={{ textShadow: "0 1px 3px rgba(0,0,0,0.8)" }}
-                          >
-                            {dock.name} ({dock.slipCount} slips)
-                          </text>
-                          {dock.confidence && (
-                            <text
-                              x={dock.x + dock.width - 4}
-                              y={dock.y - 4}
-                              textAnchor="end"
-                              fill="#a3e635"
-                              fontSize={9}
-                              className="pointer-events-none"
-                              style={{ textShadow: "0 1px 2px rgba(0,0,0,0.8)" }}
-                            >
-                              {(dock.confidence * 100).toFixed(0)}% match
-                            </text>
-                          )}
-                        </g>
-                      );
-                    })}
-                    {/* Drawing preview */}
-                    {drawing && drawStart && drawEnd && (
-                      <rect
-                        x={Math.min(drawStart.x, drawEnd.x)}
-                        y={Math.min(drawStart.y, drawEnd.y)}
-                        width={Math.abs(drawEnd.x - drawStart.x)}
-                        height={Math.abs(drawEnd.y - drawStart.y)}
-                        rx={4}
-                        fill="white"
-                        fillOpacity={0.15}
-                        stroke="white"
-                        strokeWidth={2}
-                        strokeDasharray="6 3"
-                      />
-                    )}
-                  </svg>
-                </div>
+              {/* SVG overlay for docks */}
+              {mapLoaded && !mapError && (
+                <svg
+                  ref={overlayRef}
+                  className="absolute inset-0 w-full h-full pointer-events-none z-10"
+                  style={{ pointerEvents: drawMode ? "none" : "none" }}
+                >
+                  <g className="pointer-events-auto">
+                    {renderDockOverlay()}
+                    {renderDrawPreview()}
+                  </g>
+                </svg>
               )}
             </div>
           </div>
@@ -489,21 +635,23 @@ export function SatelliteDockDetection() {
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-xs font-medium mb-1 block">X Position</label>
+                    <label className="text-xs font-medium mb-1 block">Latitude</label>
                     <Input
                       type="number"
-                      value={Math.round(selectedDock.x)}
-                      onChange={(e) => updateDock(selectedDock.id, "x", parseInt(e.target.value) || 0)}
-                      className="h-9 text-sm"
+                      step={0.0001}
+                      value={selectedDock.lat}
+                      onChange={(e) => updateDock(selectedDock.id, "lat", parseFloat(e.target.value) || 0)}
+                      className="h-9 text-sm font-mono"
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-medium mb-1 block">Y Position</label>
+                    <label className="text-xs font-medium mb-1 block">Longitude</label>
                     <Input
                       type="number"
-                      value={Math.round(selectedDock.y)}
-                      onChange={(e) => updateDock(selectedDock.id, "y", parseInt(e.target.value) || 0)}
-                      className="h-9 text-sm"
+                      step={0.0001}
+                      value={selectedDock.lng}
+                      onChange={(e) => updateDock(selectedDock.id, "lng", parseFloat(e.target.value) || 0)}
+                      className="h-9 text-sm font-mono"
                     />
                   </div>
                 </div>
@@ -573,7 +721,7 @@ export function SatelliteDockDetection() {
                 </div>
                 <p className="text-sm text-muted-foreground">
                   {docks.length === 0
-                    ? "Search for a marina location, then click 'AI Detect Docks' to automatically find docks from satellite imagery"
+                    ? "Search for a marina, then click 'Draw Dock' to draw rectangles, or 'AI Detect' for automatic detection"
                     : "Click on a dock overlay to edit its properties"}
                 </p>
               </div>

@@ -26,8 +26,8 @@ export async function POST(req: NextRequest) {
       try {
         const suggestions = await detectWithOpenAI(imageUrl, latitude, longitude, mapWidth, mapHeight);
         return apiSuccess({ suggestions, source: "openai" });
-      } catch (aiError) {
-        console.error("OpenAI vision error:", aiError);
+      } catch (aiError: any) {
+        console.error("OpenAI vision error:", aiError.message || aiError);
         // Fall through to smart detection
       }
     }

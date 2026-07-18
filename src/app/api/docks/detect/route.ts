@@ -6,8 +6,8 @@ export const dynamic = "force-dynamic";
 interface DockInput {
   id: string;
   name: string;
-  x: number;
-  y: number;
+  lng: number;
+  lat: number;
   width: number;
   height: number;
   color: string;
@@ -56,14 +56,15 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // Create slips for this dock
+      // Create slips for this dock — spread along the dock in lat/lng space
       const slipCount = Math.max(1, dockInput.slipCount);
       const slipsData = [];
+      const metersPerDegLng = 111320 * Math.cos((dockInput.lat * Math.PI) / 180);
 
       for (let s = 1; s <= slipCount; s++) {
         const slipNumber = `${dockName.charAt(0).toUpperCase()}-${s}`;
-        const posX = dockInput.x + (s - 1) * (dockInput.width / slipCount);
-        const slipW = Math.max(20, dockInput.width / slipCount * 0.8);
+        // Spread slips evenly along the dock's longitude range
+        const slipLng = dockInput.lng - (dockInput.width / 2) / metersPerDegLng + (s - 0.5) * (dockInput.width / slipCount) / metersPerDegLng;
 
         slipsData.push({
           organizationId,
@@ -79,10 +80,8 @@ export async function POST(req: NextRequest) {
           dailyRate: dockInput.dailyRate || 3.5,
           monthlyRate: dockInput.monthlyRate || 85,
           isActive: true,
-          positionX: posX,
-          positionY: dockInput.y,
-          widthPixels: slipW,
-          heightPixels: dockInput.height * 0.8,
+          positionX: slipLng,
+          positionY: dockInput.lat,
         });
       }
 
