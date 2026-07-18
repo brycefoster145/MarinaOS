@@ -90,6 +90,9 @@ export default function OnboardingPage() {
                   <Button onClick={() => setStep(1)} className="min-w-[140px]">
                     Get Started <ArrowRight className="h-4 w-4 ml-2" />
                   </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Already have an account? <a href="/sign-in" className="text-primary hover:underline font-medium">Sign in</a>
+                  </p>
                 </div>
               )}
 
