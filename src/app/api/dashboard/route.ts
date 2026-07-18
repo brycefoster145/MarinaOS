@@ -9,8 +9,7 @@ export async function GET(req: NextRequest) {
     const orgId = getOrganizationId(req);
 
     // For now, if no org header, use the first available org (dev mode)
-    const organizationId = orgId || (await getFirstOrgId());
-
+    const organizationId = orgId;
     if (!organizationId) {
       // Return empty data for first-load state
       return apiSuccess({
