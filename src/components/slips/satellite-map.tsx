@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Glasses, Crosshair, Save, Trash2, Satellite, Map, Loader2, RotateCcw, Search, Navigation } from "lucide-react";
+import { Glasses, Crosshair, Save, Trash2, Satellite, Map, Loader2, RotateCcw, Search, Navigation, Pencil } from "lucide-react";
 
 interface DetectedDock {
   id: string;
@@ -274,6 +274,15 @@ export function SatelliteDockDetection() {
           </div>
           <div className="w-px h-6 bg-border mx-1" />
           <Button
+            variant={drawing ? "default" : "outline"}
+            size="sm"
+            onClick={() => setDrawing(!drawing)}
+          >
+            <Pencil className="h-4 w-4 mr-1.5" />
+            {drawing ? "Drawing..." : "Draw Dock"}
+          </Button>
+          <div className="w-px h-6 bg-border mx-1" />
+          <Button
             variant="outline"
             size="sm"
             onClick={runAIDetection}
@@ -322,6 +331,51 @@ export function SatelliteDockDetection() {
               ref={mapContainerRef}
               className="relative"
               style={{ height: "520px", background: "#0a1628" }}
+              onMouseDown={(e) => {
+                if (!drawing || !mapRef.current) return;
+                const rect = mapContainerRef.current?.getBoundingClientRect();
+                if (!rect) return;
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                setDrawStart({ x, y });
+                setDrawEnd({ x, y });
+              }}
+              onMouseMove={(e) => {
+                if (!drawing || !drawStart || !mapRef.current) return;
+                const rect = mapContainerRef.current?.getBoundingClientRect();
+                if (!rect) return;
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                setDrawEnd({ x, y });
+              }}
+              onMouseUp={() => {
+                if (!drawing || !drawStart || !drawEnd || !mapRef.current) return;
+                const x = Math.min(drawStart.x, drawEnd.x);
+                const y = Math.min(drawStart.y, drawEnd.y);
+                const w = Math.abs(drawEnd.x - drawStart.x);
+                const h = Math.abs(drawEnd.y - drawStart.y);
+                if (w < 10 || h < 10) {
+                  setDrawStart(null);
+                  setDrawEnd(null);
+                  return;
+                }
+                const colorIdx = docks.length % DOCK_COLORS.length;
+                const newDock: DetectedDock = {
+                  id: genDockId(),
+                  name: `Dock ${String.fromCharCode(65 + docks.length)}`,
+                  x, y, width: w, height: h,
+                  color: DOCK_COLORS[colorIdx],
+                  slipCount: 4,
+                  slipLength: 40,
+                  slipWidth: 14,
+                  dailyRate: 3.5,
+                  monthlyRate: 75,
+                };
+                setDocks((prev) => [...prev, newDock]);
+                setDrawStart(null);
+                setDrawEnd(null);
+                setDrawing(false);
+              }}
             >
               {!mapLoaded && (
                 <div className="absolute inset-0 flex items-center justify-center bg-[#0a1628]">
@@ -343,7 +397,7 @@ export function SatelliteDockDetection() {
               )}
 
               {/* Overlay dock markers when map is loaded */}
-              {mapLoaded && !mapError && docks.length > 0 && (
+              {mapLoaded && !mapError && (docks.length > 0 || (drawing && drawStart && drawEnd)) && (
                 <div className="absolute inset-0 pointer-events-none z-10">
                   <svg className="w-full h-full">
                     {docks.map((dock) => {
@@ -391,6 +445,21 @@ export function SatelliteDockDetection() {
                         </g>
                       );
                     })}
+                    {/* Drawing preview */}
+                    {drawing && drawStart && drawEnd && (
+                      <rect
+                        x={Math.min(drawStart.x, drawEnd.x)}
+                        y={Math.min(drawStart.y, drawEnd.y)}
+                        width={Math.abs(drawEnd.x - drawStart.x)}
+                        height={Math.abs(drawEnd.y - drawStart.y)}
+                        rx={4}
+                        fill="white"
+                        fillOpacity={0.15}
+                        stroke="white"
+                        strokeWidth={2}
+                        strokeDasharray="6 3"
+                      />
+                    )}
                   </svg>
                 </div>
               )}
