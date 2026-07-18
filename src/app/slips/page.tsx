@@ -12,12 +12,16 @@ import { SatelliteDockDetection } from "@/components/slips/satellite-dock-detect
 import { Anchor, Map, Table2, Calendar, Plus, Ship, Satellite } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
+type SlipStatus = "AVAILABLE" | "OCCUPIED" | "RESERVED" | "MAINTENANCE" | "UNAVAILABLE";
+
 interface SlipData {
-  id: string; name: string; number: string; length: number; width: number;
-  maxDraft?: number; hasPower: boolean; hasWater: boolean; hasWiFi: boolean;
-  hasCable: boolean; status: string; positionX: number; positionY: number;
-  widthPixels: number; heightPixels: number; rotation: number;
-  dockId: string; dockName: string;
+  id: string; name: string; number: string; length: number;
+  width: number | null; maxDraft: number | null;
+  hasPower: boolean; hasWater: boolean; hasWiFi: boolean; hasCable: boolean;
+  status: SlipStatus;
+  positionX: number | null; positionY: number | null;
+  widthPixels: number | null; heightPixels: number | null; rotation: number | null;
+  dockId: string; dockName?: string;
 }
 
 interface DockData {
@@ -49,7 +53,8 @@ export default function SlipsPage() {
   }, []);
 
   const allSlips = docks.flatMap(d => d.slips.map(s => ({
-    ...s, dockName: d.name, monthlyRate: 0,
+    id: s.id, name: s.name, dockName: d.name, length: s.length,
+    width: s.width, status: s.status, monthlyRate: null,
     customerName: null, boatName: null, reservationEnd: null,
   })));
 
@@ -119,7 +124,7 @@ export default function SlipsPage() {
           <TabsContent value="list" className="mt-6">
             <GlassCard className="p-5" hover={false}>
               {loading ? <Skeleton className="h-60 rounded-2xl" /> : (
-                <SlipListView slips={allSlips} onReserve={(id) => setShowNewReservation(true)}
+                <SlipListView slips={allSlips as any} onReserve={(id) => setShowNewReservation(true)}
                   onMaintenance={(id) => setSelectedSlip(allSlips.find(s => s.id === id))}
                   onView={(id) => setSelectedSlip(allSlips.find(s => s.id === id))} />
               )}
