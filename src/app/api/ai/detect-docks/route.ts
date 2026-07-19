@@ -21,14 +21,25 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { imageUrl, latitude, longitude, zoom, mapWidth, mapHeight } = body;
 
-    // If OpenAI key is configured, use vision API for real detection
+    // Try Gemini 2.0 Flash first
+    if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "placeholder") {
+      try {
+        const suggestions = await detectWithGemini(imageUrl, latitude, longitude, mapWidth, mapHeight);
+        if (suggestions.length > 0) {
+          return apiSuccess({ suggestions, source: "gemini" });
+        }
+      } catch (aiError: any) {
+        console.error("Gemini vision error:", aiError.message || aiError);
+      }
+    }
+
+    // Fallback to OpenAI if Gemini not available
     if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== "sk-placeholder") {
       try {
         const suggestions = await detectWithOpenAI(imageUrl, latitude, longitude, mapWidth, mapHeight);
         return apiSuccess({ suggestions, source: "openai" });
       } catch (aiError: any) {
         console.error("OpenAI vision error:", aiError.message || aiError);
-        // Fall through to smart detection
       }
     }
 
@@ -39,6 +50,109 @@ export async function POST(req: NextRequest) {
     console.error("AI dock detection error:", error);
     return apiError("Failed to detect docks", 500);
   }
+}
+
+async function detectWithGemini(
+  imageUrl: string | null,
+  latitude?: number,
+  longitude?: number,
+  mapWidth: number = 800,
+  mapHeight: number = 500
+): Promise<DetectedDockSuggestion[]> {
+  const prompt = `You are analyzing a satellite image of a marina at coordinates ${latitude || "unknown"}, ${longitude || "unknown"}.
+
+The image is ${mapWidth}x${mapHeight} pixels. The center of the image is at latitude ${latitude || "unknown"}, longitude ${longitude || "unknown"}.
+
+Look for docks, piers, and slips in this marina image. For each dock you detect, provide:
+1. A name for the dock
+2. The center latitude and longitude of the dock
+3. Width and height of the dock structure in meters
+4. Number of boat slips visible
+5. Estimated slip length and width in feet
+
+Return ONLY a JSON array of detected docks with this structure:
+[
+  {
+    "name": "Dock name",
+    "lng": number,
+    "lat": number,
+    "width": number,
+    "height": number,
+    "slipCount": number,
+    "slipLength": number,
+    "slipWidth": number
+  }
+]
+
+A typical marina has docks arranged in parallel rows extending from a central pier. Each dock has 3-8 slips on each side. Slip lengths are typically 30-60 feet. The entire marina typically spans about 100-300 meters across.`;
+
+  // Strip the data URL prefix to get raw base64
+  let base64Image = "";
+  if (imageUrl) {
+    const parts = imageUrl.split(",");
+    base64Image = parts.length > 1 ? parts[1] : imageUrl;
+  }
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-exp:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { text: prompt },
+              ...(base64Image
+                ? [{ inline_data: { mime_type: "image/jpeg", data: base64Image } }]
+                : []),
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 2000,
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Gemini API error:", response.status, errorText);
+    throw new Error(`Gemini API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+  // Parse JSON from the response
+  const jsonMatch = content.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) {
+    throw new Error("No valid JSON in Gemini response");
+  }
+
+  const parsed = JSON.parse(jsonMatch[0]);
+
+  const DOCK_COLORS = [
+    "#0284c7", "#059669", "#d97706", "#7c3aed",
+    "#dc2626", "#0891b2", "#65a30d", "#0d9488",
+  ];
+
+  return parsed.map((dock: any, idx: number) => ({
+    name: dock.name || `Dock ${String.fromCharCode(65 + idx)}`,
+    lng: dock.lng || dock.x || longitude || -117.92,
+    lat: dock.lat || dock.y || latitude || 33.62,
+    width: dock.width || 200,
+    height: dock.height || 30,
+    color: DOCK_COLORS[idx % DOCK_COLORS.length],
+    slipCount: dock.slipCount || 4,
+    slipLength: dock.slipLength || 40,
+    slipWidth: dock.slipWidth || 14,
+    dailyRate: 3.5 + idx * 0.5,
+    monthlyRate: 75 + idx * 10,
+    confidence: 0.85 - idx * 0.05,
+  }));
 }
 
 async function detectWithOpenAI(
@@ -55,7 +169,7 @@ The image is ${mapWidth}x${mapHeight} pixels. The center of the image is at lati
 Look for docks, piers, and slips in this marina image. For each dock you detect, provide:
 1. A name for the dock
 2. The center latitude and longitude of the dock
-3. Width and height of the dock structure in meters (estimate based on typical dock sizes — a slip is about 3-5m wide and 10-20m long)
+3. Width and height of the dock structure in meters
 4. Number of boat slips visible
 5. Estimated slip length and width in feet
 
