@@ -53,13 +53,13 @@ export async function GET(
         year: b.year,
         length: b.length,
         isPrimary: b.isPrimary,
-        insurance: b.insurance
+        insurance: b.insurance.length > 0
           ? {
-              id: b.insurance.id,
-              provider: b.insurance.provider,
-              policyNumber: b.insurance.policyNumber,
-              expirationDate: b.insurance.expirationDate?.toISOString().split("T")[0],
-              isVerified: b.insurance.isVerified,
+              id: b.insurance[0].id,
+              provider: b.insurance[0].provider,
+              policyNumber: b.insurance[0].policyNumber,
+              expirationDate: b.insurance[0].expirationDate?.toISOString().split("T")[0],
+              isVerified: b.insurance[0].isVerified,
             }
           : null,
       })),
