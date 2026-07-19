@@ -104,6 +104,7 @@ export default function RootLayout({
         position="top-right"
         toastOptions={{
           className: "glass-card",
+          style: { color: "#f1f5f9" },
         }}
       />
     </ThemeProvider>
