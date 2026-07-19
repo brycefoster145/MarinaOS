@@ -25,9 +25,13 @@ interface DetectedDock {
 
 interface MapSuggestion {
   name: string;
-  lng: number;
-  lat: number;
+  /** Center x pixel in original image */
+  px: number;
+  /** Center y pixel in original image */
+  py: number;
+  /** Dock width in meters */
   width: number;
+  /** Dock height in meters */
   height: number;
   color: string;
   slipCount: number;
@@ -288,6 +292,10 @@ export function SatelliteDockDetection() {
       const canvas = map.getCanvas();
       const rect = container.getBoundingClientRect();
 
+      // Get the full-resolution canvas dimensions
+      const origWidth = canvas.width;
+      const origHeight = canvas.height;
+
       // Resize image to max 800px wide to keep API call fast
       let imageUrl = canvas.toDataURL("image/jpeg", 0.7);
       const img = new window.Image();
@@ -296,12 +304,19 @@ export function SatelliteDockDetection() {
         img.onerror = () => reject();
         img.src = imageUrl;
       });
-      // If image is wider than 800px, resize it
+
+      // Track resize ratio so we can map pixel coords back to canvas space
+      let resizeRatio = 1;
+      let finalWidth = img.width;
+      let finalHeight = img.height;
       if (img.width > 800) {
         const scale = 800 / img.width;
+        finalWidth = 800;
+        finalHeight = img.height * scale;
+        resizeRatio = scale;
         const resizedCanvas = document.createElement("canvas");
-        resizedCanvas.width = 800;
-        resizedCanvas.height = img.height * scale;
+        resizedCanvas.width = finalWidth;
+        resizedCanvas.height = finalHeight;
         const ctx = resizedCanvas.getContext("2d");
         if (ctx) {
           ctx.drawImage(img, 0, 0, resizedCanvas.width, resizedCanvas.height);
@@ -319,15 +334,46 @@ export function SatelliteDockDetection() {
           zoom: map.getZoom(),
           mapWidth: rect.width,
           mapHeight: rect.height,
+          imageWidth: finalWidth,
+          imageHeight: finalHeight,
         }),
       });
 
       const json = await res.json();
       if (json.data?.suggestions && json.data.suggestions.length > 0) {
-        const newDocks = json.data.suggestions.map((s: MapSuggestion) => ({
-          id: genDockId(),
-          ...s,
-        }));
+        const newDocks = json.data.suggestions.map((s: MapSuggestion) => {
+          // Convert pixel coordinates back to full-canvas space
+          const canvasPx = s.px / resizeRatio;
+          const canvasPy = s.py / resizeRatio;
+
+          // Convert pixel coords to lat/lng using Mapbox unproject
+          const lngLat = map.unproject([canvasPx, canvasPy]);
+
+          // Estimate meters per pixel at this zoom and latitude
+          const bounds = map.getBounds();
+          const sw = bounds.getSouthWest();
+          const ne = bounds.getNorthEast();
+          const metersPerDegLng = 111320 * Math.cos((lngLat.lat * Math.PI) / 180);
+          const metersPerDegLat = 111320;
+          const pixelToMetersLng = (ne.lng - sw.lng) / origWidth * metersPerDegLng;
+          const pixelToMetersLat = (ne.lat - sw.lat) / origHeight * metersPerDegLat;
+
+          return {
+            id: genDockId(),
+            name: s.name,
+            lng: lngLat.lng,
+            lat: lngLat.lat,
+            width: s.width || (s.px ? s.width / resizeRatio * pixelToMetersLng : 80),
+            height: s.height || 8,
+            color: s.color || DOCK_COLORS[0],
+            slipCount: s.slipCount || 4,
+            slipLength: s.slipLength || 40,
+            slipWidth: s.slipWidth || 14,
+            dailyRate: s.dailyRate || 3.5,
+            monthlyRate: s.monthlyRate || 85,
+            confidence: s.confidence || 0.8,
+          };
+        });
         setDocks((prev) => {
           const existing = [...prev];
           newDocks.forEach((nd: DetectedDock) => {

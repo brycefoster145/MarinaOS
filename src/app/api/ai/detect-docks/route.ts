@@ -3,9 +3,13 @@ import { apiSuccess, apiError } from "@/lib/api";
 
 interface DetectedDockSuggestion {
   name: string;
-  lng: number;
-  lat: number;
+  /** Center x in pixels within the original image */
+  px: number;
+  /** Center y in pixels within the original image */
+  py: number;
+  /** Dock width in meters */
   width: number;
+  /** Dock height in meters */
   height: number;
   color: string;
   slipCount: number;
@@ -19,12 +23,15 @@ interface DetectedDockSuggestion {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { imageUrl, latitude, longitude, zoom, mapWidth, mapHeight } = body;
+    const { imageUrl, latitude, longitude, zoom, mapWidth, mapHeight, imageWidth, imageHeight } = body;
 
-    // Try Gemini 2.0 Flash first
+    const width = imageWidth || mapWidth || 800;
+    const height = imageHeight || mapHeight || 500;
+
+    // Try Gemini 2.5 Flash first
     if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "placeholder") {
       try {
-        const suggestions = await detectWithGemini(imageUrl, latitude, longitude, mapWidth, mapHeight);
+        const suggestions = await detectWithGemini(imageUrl, latitude, longitude, width, height);
         if (suggestions.length > 0) {
           return apiSuccess({ suggestions, source: "gemini" });
         }
@@ -36,7 +43,7 @@ export async function POST(req: NextRequest) {
     // Fallback to OpenAI if Gemini not available
     if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== "sk-placeholder") {
       try {
-        const suggestions = await detectWithOpenAI(imageUrl, latitude, longitude, mapWidth, mapHeight);
+        const suggestions = await detectWithOpenAI(imageUrl, latitude, longitude, width, height);
         return apiSuccess({ suggestions, source: "openai" });
       } catch (aiError: any) {
         console.error("OpenAI vision error:", aiError.message || aiError);
@@ -44,7 +51,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Smart detection based on location data
-    const suggestions = generateSmartSuggestions(latitude, longitude, zoom);
+    const suggestions = generateSmartSuggestions(latitude, longitude, width, height);
     return apiSuccess({ suggestions, source: "smart" });
   } catch (error) {
     console.error("AI dock detection error:", error);
@@ -56,35 +63,30 @@ async function detectWithGemini(
   imageUrl: string | null,
   latitude?: number,
   longitude?: number,
-  mapWidth: number = 800,
-  mapHeight: number = 500
+  imageWidth: number = 800,
+  imageHeight: number = 500
 ): Promise<DetectedDockSuggestion[]> {
   const prompt = `You are analyzing a satellite image of a marina at coordinates ${latitude || "unknown"}, ${longitude || "unknown"}.
 
-The image is ${mapWidth}x${mapHeight} pixels. The center of the image is at latitude ${latitude || "unknown"}, longitude ${longitude || "unknown"}.
+The image dimensions are ${imageWidth}x${imageHeight} pixels. Pixel coordinates start at (0,0) in the top-left corner.
 
-Look for docks, piers, and slips in this marina image. For each dock you detect, provide:
-1. A name for the dock
-2. The center latitude and longitude of the dock
-3. Width and height of the dock structure in meters
-4. Number of boat slips visible
-5. Estimated slip length and width in feet
+Look for docks, piers, and boat slips in this marina image. For each dock you find, identify its position as PIXEL COORDINATES within the image.
 
 Return ONLY a JSON array of detected docks with this structure:
 [
   {
-    "name": "Dock name",
-    "lng": number,
-    "lat": number,
-    "width": number,
-    "height": number,
-    "slipCount": number,
-    "slipLength": number,
-    "slipWidth": number
+    "name": "Dock name (e.g. Main Dock, East Dock, etc.)",
+    "px": number (center x of the dock in pixels, 0 to ${imageWidth}),
+    "py": number (center y of the dock in pixels, 0 to ${imageHeight}),
+    "width": number (dock width in meters - estimate from image),
+    "height": number (dock height in meters - estimate from image),
+    "slipCount": number (visible boat slips, at least 2),
+    "slipLength": number (estimated slip length in feet, 30-60),
+    "slipWidth": number (estimated slip width in feet, 12-18)
   }
 ]
 
-A typical marina has docks arranged in parallel rows extending from a central pier. Each dock has 3-8 slips on each side. Slip lengths are typically 30-60 feet. The entire marina typically spans about 100-300 meters across.`;
+IMPORTANT: The px, py values MUST be pixel coordinates in the image, NOT latitude/longitude. A typical marina at zoom 17-18 has docks that are 80-300 pixels long.`;
 
   // Strip the data URL prefix to get raw base64
   let base64Image = "";
@@ -110,7 +112,7 @@ A typical marina has docks arranged in parallel rows extending from a central pi
           },
         ],
         generationConfig: {
-          temperature: 0.2,
+          temperature: 0.1,
           maxOutputTokens: 2000,
         },
       }),
@@ -141,10 +143,10 @@ A typical marina has docks arranged in parallel rows extending from a central pi
 
   return parsed.map((dock: any, idx: number) => ({
     name: dock.name || `Dock ${String.fromCharCode(65 + idx)}`,
-    lng: dock.lng || dock.x || longitude || -117.92,
-    lat: dock.lat || dock.y || latitude || 33.62,
-    width: dock.width || 200,
-    height: dock.height || 30,
+    px: dock.px || dock.x || imageWidth / 2 + (idx - 1) * 100,
+    py: dock.py || dock.y || imageHeight / 2 + idx * 80,
+    width: dock.width || 80,
+    height: dock.height || 8,
     color: DOCK_COLORS[idx % DOCK_COLORS.length],
     slipCount: dock.slipCount || 4,
     slipLength: dock.slipLength || 40,
@@ -159,35 +161,30 @@ async function detectWithOpenAI(
   imageUrl: string | null,
   latitude?: number,
   longitude?: number,
-  mapWidth: number = 800,
-  mapHeight: number = 500
+  imageWidth: number = 800,
+  imageHeight: number = 500
 ): Promise<DetectedDockSuggestion[]> {
   const prompt = `You are analyzing a satellite image of a marina at coordinates ${latitude || "unknown"}, ${longitude || "unknown"}.
 
-The image is ${mapWidth}x${mapHeight} pixels. The center of the image is at latitude ${latitude || "unknown"}, longitude ${longitude || "unknown"}.
+The image dimensions are ${imageWidth}x${imageHeight} pixels. Pixel coordinates start at (0,0) in the top-left corner.
 
-Look for docks, piers, and slips in this marina image. For each dock you detect, provide:
-1. A name for the dock
-2. The center latitude and longitude of the dock
-3. Width and height of the dock structure in meters
-4. Number of boat slips visible
-5. Estimated slip length and width in feet
+Look for docks, piers, and boat slips in this marina image. For each dock you find, identify its position as PIXEL COORDINATES within the image.
 
 Return ONLY a JSON array of detected docks with this structure:
 [
   {
-    "name": "Dock name",
-    "lng": number,
-    "lat": number,
-    "width": number,
-    "height": number,
-    "slipCount": number,
-    "slipLength": number,
-    "slipWidth": number
+    "name": "Dock name (e.g. Main Dock, East Dock, etc.)",
+    "px": number (center x of the dock in pixels, 0 to ${imageWidth}),
+    "py": number (center y of the dock in pixels, 0 to ${imageHeight}),
+    "width": number (dock width in meters - estimate from image),
+    "height": number (dock height in meters - estimate from image),
+    "slipCount": number (visible boat slips, at least 2),
+    "slipLength": number (estimated slip length in feet, 30-60),
+    "slipWidth": number (estimated slip width in feet, 12-18)
   }
 ]
 
-A typical marina has docks arranged in parallel rows extending from a central pier. Each dock has 3-8 slips on each side. Slip lengths are typically 30-60 feet. The entire marina typically spans about 100-300 meters across.`;
+IMPORTANT: The px, py values MUST be pixel coordinates in the image, NOT latitude/longitude.`;
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -209,7 +206,7 @@ A typical marina has docks arranged in parallel rows extending from a central pi
         },
       ],
       max_tokens: 2000,
-      temperature: 0.3,
+      temperature: 0.1,
     }),
   });
 
@@ -237,10 +234,10 @@ A typical marina has docks arranged in parallel rows extending from a central pi
 
   return parsed.map((dock: any, idx: number) => ({
     name: dock.name || `Dock ${String.fromCharCode(65 + idx)}`,
-    lng: dock.lng || dock.x || longitude || -117.92,
-    lat: dock.lat || dock.y || latitude || 33.62,
-    width: dock.width || 200,
-    height: dock.height || 30,
+    px: dock.px || dock.x || imageWidth / 2 + (idx - 1) * 100,
+    py: dock.py || dock.y || imageHeight / 2 + idx * 80,
+    width: dock.width || 80,
+    height: dock.height || 8,
     color: DOCK_COLORS[idx % DOCK_COLORS.length],
     slipCount: dock.slipCount || 4,
     slipLength: dock.slipLength || 40,
@@ -254,24 +251,17 @@ A typical marina has docks arranged in parallel rows extending from a central pi
 function generateSmartSuggestions(
   latitude?: number,
   longitude?: number,
-  zoom?: number
+  imageWidth: number = 800,
+  imageHeight: number = 500
 ): DetectedDockSuggestion[] {
-  const centerLat = latitude || 33.62;
-  const centerLng = longitude || -117.92;
-  // Approximate meters per degree at this latitude
-  const metersPerDegLat = 111320;
-  const metersPerDegLng = 111320 * Math.cos((centerLat * Math.PI) / 180);
-
-  // Generate offset in degrees for ~100m spacing
-  const offset1 = 100 / metersPerDegLng; // ~100m east
-  const offset2 = 200 / metersPerDegLng; // ~200m east
-  const offset3 = 100 / metersPerDegLat; // ~100m south
+  const cx = imageWidth / 2;
+  const cy = imageHeight / 2;
 
   const suggestions: DetectedDockSuggestion[] = [
     {
       name: "Main Pier",
-      lng: centerLng + offset1 * 0.3,
-      lat: centerLat,
+      px: cx,
+      py: cy - 80,
       width: 120,
       height: 8,
       color: "#0284c7",
@@ -284,8 +274,8 @@ function generateSmartSuggestions(
     },
     {
       name: "East Dock",
-      lng: centerLng + offset1,
-      lat: centerLat - offset3 * 0.4,
+      px: cx + 100,
+      py: cy + 20,
       width: 100,
       height: 8,
       color: "#059669",
@@ -298,8 +288,8 @@ function generateSmartSuggestions(
     },
     {
       name: "West Dock",
-      lng: centerLng + offset1 * 0.5,
-      lat: centerLat - offset3 * 0.8,
+      px: cx - 80,
+      py: cy + 40,
       width: 90,
       height: 8,
       color: "#d97706",
@@ -312,8 +302,8 @@ function generateSmartSuggestions(
     },
     {
       name: "Guest Dock",
-      lng: centerLng,
-      lat: centerLat - offset3,
+      px: cx + 20,
+      py: cy + 130,
       width: 70,
       height: 7,
       color: "#7c3aed",
@@ -326,8 +316,8 @@ function generateSmartSuggestions(
     },
     {
       name: "Fuel Dock",
-      lng: centerLng + offset2,
-      lat: centerLat,
+      px: cx + 200,
+      py: cy - 60,
       width: 60,
       height: 9,
       color: "#dc2626",
@@ -339,24 +329,6 @@ function generateSmartSuggestions(
       confidence: 0.75,
     },
   ];
-
-  // Adjust based on coordinates if available
-  if (latitude && longitude) {
-    // Mediterranean-style marinas typically have more compact layouts
-    if (latitude > 35 && latitude < 45 && longitude > -10 && longitude < 30) {
-      suggestions.forEach((s) => {
-        s.width *= 0.8;
-        s.slipCount = Math.max(2, Math.floor(s.slipCount * 0.8));
-      });
-    }
-    // Tropical marinas tend to have longer slips for larger yachts
-    if (Math.abs(latitude) < 25) {
-      suggestions.forEach((s) => {
-        s.slipLength *= 1.2;
-        s.slipWidth *= 1.1;
-      });
-    }
-  }
 
   return suggestions;
 }
