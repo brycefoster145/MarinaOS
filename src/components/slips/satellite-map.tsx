@@ -397,103 +397,159 @@ export function SatelliteDockDetection() {
   };
 
   // Canvas-based dock detection (no AI API needed)
-  // Color-based dock detection from canvas
+  // Detect dock shapes (long bright rectangles) from canvas
   const detectDocksFromCanvas = (canvas: HTMLCanvasElement): { x: number; y: number; w: number; h: number }[] => {
     const ctx = canvas.getContext("2d");
     if (!ctx) return [];
 
     const w = canvas.width;
     const h = canvas.height;
-    const imageData = ctx.getImageData(0, 0, w, h);
+    // Use a smaller working image for speed
+    const scale = Math.min(1, 400 / Math.max(w, h));
+    const sw = Math.round(w * scale);
+    const sh = Math.round(h * scale);
+    const tmpCanvas = document.createElement("canvas");
+    tmpCanvas.width = sw;
+    tmpCanvas.height = sh;
+    const tmpCtx = tmpCanvas.getContext("2d");
+    if (!tmpCtx) return [];
+    tmpCtx.drawImage(canvas, 0, 0, sw, sh);
+
+    const imageData = tmpCtx.getImageData(0, 0, sw, sh);
     const data = imageData.data;
 
-    // Downsample to a grid for faster processing
-    const gridSize = 24;
-    const cellW = Math.max(1, Math.floor(w / gridSize));
-    const cellH = Math.max(1, Math.floor(h / gridSize));
-
-    // Classify each grid cell: 0=water, 1=dock, 2=other
-    const grid: number[] = [];
-    for (let gy = 0; gy < gridSize; gy++) {
-      for (let gx = 0; gx < gridSize; gx++) {
-        let rSum = 0, gSum = 0, bSum = 0, count = 0;
-        for (let py = gy * cellH; py < (gy + 1) * cellH && py < h; py++) {
-          for (let px = gx * cellW; px < (gx + 1) * cellW && px < w; px++) {
-            const idx = (py * w + px) * 4;
-            rSum += data[idx];
-            gSum += data[idx + 1];
-            bSum += data[idx + 2];
-            count++;
-          }
-        }
-        if (count === 0) { grid.push(2); continue; }
-        const r = rSum / count, g = gSum / count, b = bSum / count;
-        const brightness = (r + g + b) / 3;
-        // Water: dark blue (low R, low G, medium B, low brightness)
-        const isWater = b > r * 1.3 && b > g * 1.2 && brightness < 120;
-        // Dock: bright gray/white (high R, G, B)
-        const isDock = brightness > 150 && r > 120 && g > 120 && b > 120;
-        grid.push(isDock ? 1 : isWater ? 0 : 2);
-      }
+    // Convert to grayscale
+    const gray = new Float32Array(sw * sh);
+    for (let i = 0; i < sw * sh; i++) {
+      const idx = i * 4;
+      gray[i] = data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
     }
 
-    // Find dock regions (connected bright cells)
-    const dockRegions: { x: number; y: number; w: number; h: number }[] = [];
-    const visited: boolean[] = new Array(gridSize * gridSize).fill(false);
+    // Find the water brightness level (40th percentile = darkest 40% is water)
+    const sorted = [...gray].sort((a, b) => a - b);
+    const waterLevel = sorted[Math.floor(sorted.length * 0.4)];
+    const dockThreshold = waterLevel + 35;
 
-    for (let gy = 0; gy < gridSize; gy++) {
-      for (let gx = 0; gx < gridSize; gx++) {
-        const idx = gy * gridSize + gx;
-        if (grid[idx] !== 1 || visited[idx]) continue;
+    // Scan each row for bright stripes (dark→bright→dark patterns)
+    // A dock at row y appears as a contiguous run of bright pixels
+    const minDockWidth = Math.round(sw * 0.04); // At least 4% of image width
+    const rowStripeCounts: number[] = new Array(sh).fill(0);
 
-        // Flood fill to find connected dock cells
-        const stack: number[] = [idx];
-        let minX = gx, maxX = gx, minY = gy, maxY = gy;
-        visited[idx] = true;
+    for (let y = 0; y < sh; y++) {
+      let stripes = 0;
+      let x = 0;
+      while (x < sw) {
+        // Find start of bright run
+        while (x < sw && gray[y * sw + x] <= dockThreshold) x++;
+        if (x >= sw) break;
+        const start = x;
+        while (x < sw && gray[y * sw + x] > dockThreshold) x++;
+        const end = x - 1;
+        const width = end - start + 1;
+        if (width >= minDockWidth) {
+          stripes++;
+        }
+      }
+      rowStripeCounts[y] = stripes;
+    }
 
-        while (stack.length > 0) {
-          const cur = stack.pop()!;
-          const cy = Math.floor(cur / gridSize);
-          const cx = cur % gridSize;
-          minX = Math.min(minX, cx);
-          maxX = Math.max(maxX, cx);
-          minY = Math.min(minY, cy);
-          maxY = Math.max(maxY, cy);
+    // Find rows with docks (2+ stripes = multiple docks crossing this row)
+    // Group consecutive dock rows into dock bands
+    interface DockBand {
+      yStart: number;
+      yEnd: number;
+      xStarts: number[];
+      xEnds: number[];
+    }
+    const bands: DockBand[] = [];
+    let inBand = false;
+    let currentBand: DockBand | null = null;
 
-          // Check 4 neighbors
-          const neighbors = [
-            cy > 0 ? cur - gridSize : -1,
-            cy < gridSize - 1 ? cur + gridSize : -1,
-            cx > 0 ? cur - 1 : -1,
-            cx < gridSize - 1 ? cur + 1 : -1,
-          ];
-          for (const n of neighbors) {
-            if (n >= 0 && grid[n] === 1 && !visited[n]) {
-              visited[n] = true;
-              stack.push(n);
+    for (let y = 0; y < sh; y++) {
+      if (rowStripeCounts[y] >= 1) {
+        if (!inBand) {
+          currentBand = { yStart: y, yEnd: y, xStarts: [], xEnds: [] };
+          inBand = true;
+        }
+        if (currentBand) {
+          currentBand.yEnd = y;
+          // Scan this row for stripe positions
+          let x = 0;
+          while (x < sw) {
+            while (x < sw && gray[y * sw + x] <= dockThreshold) x++;
+            if (x >= sw) break;
+            const start = x;
+            while (x < sw && gray[y * sw + x] > dockThreshold) x++;
+            const end = x - 1;
+            if (end - start + 1 >= minDockWidth) {
+              currentBand.xStarts.push(start);
+              currentBand.xEnds.push(end);
             }
           }
         }
-
-        const rw = (maxX - minX + 1) * cellW;
-        const rh = (maxY - minY + 1) * cellH;
-        // Filter: docks should be long and thin (width > 2x height or height > 2x width)
-        if (rw > rh * 2 && rw > cellW * 3) {
-          dockRegions.push({
-            x: (minX + maxX) / 2 * cellW + cellW / 2,
-            y: (minY + maxY) / 2 * cellH + cellH / 2,
-            w: rw, h: rh,
-          });
-        } else if (rh > rw * 2 && rh > cellH * 3) {
-          dockRegions.push({
-            x: (minX + maxX) / 2 * cellW + cellW / 2,
-            y: (minY + maxY) / 2 * cellH + cellH / 2,
-            w: rw, h: rh,
-          });
+      } else {
+        if (inBand && currentBand) {
+          // Only keep the band if it's tall enough (at least 3 rows)
+          if (currentBand.yEnd - currentBand.yStart >= 3) {
+            bands.push(currentBand);
+          }
+          currentBand = null;
         }
+        inBand = false;
       }
     }
+    if (inBand && currentBand && currentBand.yEnd - currentBand.yStart >= 3) {
+      bands.push(currentBand);
+    }
 
+    // Convert bands to dock regions
+    const dockRegions: { x: number; y: number; w: number; h: number }[] = [];
+
+    bands.forEach((band) => {
+      // Find the most common x position of stripes (cluster them)
+      // Group stripes by x position
+      const stripeClusters: { x: number; count: number }[] = [];
+      for (let i = 0; i < band.xStarts.length; i++) {
+        const cx = (band.xStarts[i] + band.xEnds[i]) / 2;
+        // Find or create cluster
+        let found = false;
+        for (const c of stripeClusters) {
+          if (Math.abs(c.x - cx) < minDockWidth * 0.5) {
+            c.count++;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          stripeClusters.push({ x: cx, count: 1 });
+        }
+      }
+
+      // Sort clusters by count (most common = most likely dock)
+      stripeClusters.sort((a, b) => b.count - a.count);
+
+      // Take the top clusters
+      const topClusters = stripeClusters.slice(0, Math.min(8, stripeClusters.length));
+
+      topClusters.forEach((cluster) => {
+        const dockW = minDockWidth * 3; // Estimate dock width
+        const dockH = (band.yEnd - band.yStart + 1) / scale * 1.5;
+        const centerX = (cluster.x) / scale;
+        const centerY = (band.yStart + band.yEnd) / 2 / scale;
+
+        // Only add if it's a proper long rectangle (w > 2*h)
+        if (dockW > dockH) {
+          dockRegions.push({
+            x: centerX,
+            y: centerY,
+            w: dockW,
+            h: dockH,
+          });
+        }
+      });
+    });
+
+    // Sort by y position and remove duplicates
     dockRegions.sort((a, b) => a.y - b.y);
     return dockRegions;
   };
