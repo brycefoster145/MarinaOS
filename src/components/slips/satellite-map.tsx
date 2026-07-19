@@ -578,6 +578,9 @@ export function SatelliteDockDetection() {
       return <g key={dock.id}>{slips}{walkway}{label}</g>;
     });
   };
+      return <g key={dock.id}>{slips}{walkway}{label}</g>;
+    });
+  };
   // Render drawing preview
   const renderDrawPreview = () => {
     if (!drawStart || !drawCurrent || !mapRef.current) return null;
