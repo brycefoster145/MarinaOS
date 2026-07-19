@@ -73,9 +73,9 @@ export async function GET(
       })),
       invoices: customer.invoices.map((inv) => ({
         id: inv.id,
-        number: inv.number,
+        number: inv.invoiceNumber,
         date: inv.createdAt.toISOString().split("T")[0],
-        amount: inv.amount || 0,
+        amount: Number(inv.totalAmount) || 0,
         status: inv.status,
       })),
     });
