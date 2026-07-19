@@ -82,25 +82,33 @@ export async function GET(req: NextRequest) {
       if (coords.length < 2) return;
 
       let sumLat = 0, sumLon = 0;
-      coords.forEach((c: any) => { sumLat += c.lat; sumLon += c.lon; });
+      let minLat = Infinity, maxLat = -Infinity;
+      let minLon = Infinity, maxLon = -Infinity;
+      coords.forEach((c: any) => {
+        sumLat += c.lat; sumLon += c.lon;
+        if (c.lat < minLat) minLat = c.lat;
+        if (c.lat > maxLat) maxLat = c.lat;
+        if (c.lon < minLon) minLon = c.lon;
+        if (c.lon > maxLon) maxLon = c.lon;
+      });
       const centerLat = sumLat / coords.length;
       const centerLon = sumLon / coords.length;
 
-      let totalLength = 0;
-      for (let i = 1; i < coords.length; i++) {
-        const dlat = (coords[i].lat - coords[i - 1].lat) * 111320;
-        const dlng = (coords[i].lon - coords[i - 1].lon) * 111320 * Math.cos((centerLat * Math.PI) / 180);
-        totalLength += Math.sqrt(dlat * dlat + dlng * dlng);
-      }
+      // Calculate actual east-west (width) and north-south (height) spans in meters
+      const spanLng = (maxLon - minLon) * 111320 * Math.cos((centerLat * Math.PI) / 180);
+      const spanLat = (maxLat - minLat) * 111320;
+      // Ensure minimum dimensions
+      const dockWidth = Math.max(spanLng, 4);
+      const dockHeight = Math.max(spanLat, 4);
 
-      const slipCount = Math.max(2, Math.round(totalLength / 4.5));
+      const slipCount = Math.max(2, Math.round(Math.max(dockWidth, dockHeight) / 4.5));
 
       docks.push({
         name: way.tags?.name || `Dock ${dockLetters[idx % 26]}`,
         lat: centerLat,
         lng: centerLon,
-        width: totalLength,
-        height: 8,
+        width: dockWidth,
+        height: dockHeight,
         slipCount,
         slipLength: 40,
         slipWidth: 14,
