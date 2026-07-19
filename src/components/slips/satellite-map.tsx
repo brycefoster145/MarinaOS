@@ -335,8 +335,36 @@ export function SatelliteDockDetection() {
       });
 
       const marinaName = json.data.marinaName;
-      toast.success(`Found ${docks.length} docks from OpenStreetMap${marinaName ? ` for ${marinaName}` : ""}`);
-      return docks;
+
+      // Merge nearby OSM piers into logical docks (finger piers are individual OSM ways)
+      const merged: DetectedDock[] = [];
+      for (const dock of docks) {
+        let merged = false;
+        for (const m of merged) {
+          // Merge if within 30m of each other (same dock structure)
+          const metersPerDegLng = 111320 * Math.cos((dock.lat * Math.PI) / 180);
+          const distM = Math.abs(dock.lng - m.lng) * metersPerDegLng;
+          if (distM < 30) {
+            // Average positions, combine slip counts
+            m.lng = (m.lng + dock.lng) / 2;
+            m.lat = (m.lat + dock.lat) / 2;
+            m.width = Math.max(m.width, dock.width);
+            m.slipCount = Math.max(m.slipCount, dock.slipCount);
+            merged = true;
+            break;
+          }
+        }
+        if (!merged) merged.push({ ...dock, slipStatuses: generateSlipStatuses(dock.slipCount) });
+      }
+
+      // Sort by position (north to south) and rename
+      merged.sort((a, b) => b.lat - a.lat);
+      merged.forEach((d, i) => {
+        d.name = `Dock ${String.fromCharCode(65 + i)}`;
+      });
+
+      toast.success(`Found ${merged.length} docks from OpenStreetMap${marinaName ? ` for ${marinaName}` : ""}`);
+      return merged;
     } catch (err) {
       console.error("OSM query error:", err);
       return null;
