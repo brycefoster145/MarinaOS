@@ -21,6 +21,8 @@ interface DetectedDock {
   dailyRate: number;
   monthlyRate: number;
   confidence?: number;
+  /** Per-slip status: AVAILABLE, OCCUPIED, RESERVED, MAINTENANCE, UNAVAILABLE */
+  slipStatuses?: string[];
 }
 
 interface MapSuggestion {
@@ -46,6 +48,27 @@ const DOCK_COLORS = [
   "#0284c7", "#059669", "#d97706", "#7c3aed",
   "#dc2626", "#0891b2", "#65a30d", "#0d9488",
 ];
+
+// Slip status colors
+const SLIP_STATUS_COLORS: Record<string, string> = {
+  AVAILABLE: "#22c55e",
+  OCCUPIED: "#3b82f6",
+  RESERVED: "#eab308",
+  MAINTENANCE: "#ef4444",
+  UNAVAILABLE: "#6b7280",
+};
+
+function generateSlipStatuses(count: number): string[] {
+  const statuses: string[] = [];
+  for (let i = 0; i < count; i++) {
+    // ~70% available, ~20% occupied, ~10% reserved
+    const rand = Math.random();
+    if (rand < 0.7) statuses.push("AVAILABLE");
+    else if (rand < 0.9) statuses.push("OCCUPIED");
+    else statuses.push("RESERVED");
+  }
+  return statuses;
+}
 
 let dockIdCounter = 0;
 function genDockId() {
@@ -364,6 +387,7 @@ export function SatelliteDockDetection() {
           dailyRate: 3.5 + idx * 0.5,
           monthlyRate: 75 + idx * 10,
           confidence: 0.95,
+          slipStatuses: generateSlipStatuses(slipCount),
         });
       });
 
@@ -616,6 +640,7 @@ export function SatelliteDockDetection() {
             dailyRate: 3.5 + idx * 0.5,
             monthlyRate: 75 + idx * 10,
             confidence: 0.9,
+            slipStatuses: generateSlipStatuses(slipCount),
           };
         });
 
@@ -698,6 +723,7 @@ export function SatelliteDockDetection() {
             dailyRate: s.dailyRate || 3.5,
             monthlyRate: s.monthlyRate || 85,
             confidence: s.confidence || 0.8,
+            slipStatuses: generateSlipStatuses(s.slipCount || 4),
           };
         });
         setDocks((prev) => {
@@ -769,6 +795,7 @@ export function SatelliteDockDetection() {
       slipWidth: 14,
       dailyRate: 3.5,
       monthlyRate: 85,
+      slipStatuses: generateSlipStatuses(slipCount),
     };
 
     setDocks((prev) => [...prev, newDock]);
@@ -807,6 +834,7 @@ export function SatelliteDockDetection() {
       slipWidth: 14,
       dailyRate: 3.5 + idx * 0.3,
       monthlyRate: 75 + idx * 5,
+      slipStatuses: generateSlipStatuses(totalSlips),
     };
 
     setDocks((prev) => [...prev, newDock]);
@@ -904,16 +932,19 @@ export function SatelliteDockDetection() {
           sh = slipWidthPx;
         }
 
-        // Only show slip number if slip is big enough
+        // Use status color if available, otherwise fall back to dock color
+        const slipStatus = dock.slipStatuses?.[i] || "AVAILABLE";
+        const slipColor = SLIP_STATUS_COLORS[slipStatus] || dock.color;
         const showNumber = slipWidthPx > 12;
 
         slips.push(
           <g key={`slip-${dock.id}-${i}`}>
             <rect
               x={sx} y={sy} width={sw} height={sh} rx={2}
-              fill={dock.color}
-              fillOpacity={isSelected ? 0.7 : 0.45}
-              stroke={dock.color} strokeWidth={1}
+              fill={slipColor}
+              fillOpacity={isSelected ? 0.85 : 0.65}
+              stroke={isSelected ? "#ffffff" : "rgba(255,255,255,0.3)"}
+              strokeWidth={1}
               className="cursor-pointer"
               onClick={() => setSelectedDockId(dock.id)}
             />
@@ -1288,6 +1319,25 @@ export function SatelliteDockDetection() {
                   {lngLat[1].toFixed(4)}, {lngLat[0].toFixed(4)}
                 </span>
               </div>
+              {/* Slip status legend */}
+              {docks.length > 0 && (
+                <div className="pt-2 border-t border-border mt-2">
+                  <span className="text-xs font-medium text-muted-foreground block mb-1.5">Slip Status</span>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { label: "Available", color: "#22c55e" },
+                      { label: "Occupied", color: "#3b82f6" },
+                      { label: "Reserved", color: "#eab308" },
+                      { label: "Maintenance", color: "#ef4444" },
+                    ].map((s) => (
+                      <div key={s.label} className="flex items-center gap-1">
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+                        <span className="text-[10px] text-muted-foreground">{s.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
