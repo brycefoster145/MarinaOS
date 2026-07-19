@@ -303,118 +303,100 @@ export function SatelliteDockDetection() {
     }
   };
 
-  // Query OpenStreetMap for marina dock data
+  // Query OpenStreetMap for marina dock data via server proxy
   const queryOSMForMarina = async (lat: number, lng: number): Promise<DetectedDock[] | null> => {
     try {
-      const overpassQuery = `[out:json];
-        (
-          way["man_made"="pier"](around:400,${lat},${lng});
-          way["waterway"="dock"](around:400,${lat},${lng});
-          way["leisure"="marina"](around:400,${lat},${lng});
-          relation["leisure"="marina"](around:400,${lat},${lng});
-        );
-        out body;
-        >;
-        out skel qt;`;
-
-      const res = await fetch(
-        `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`,
-        { headers: { "User-Agent": "MarinaOS/1.0" } }
-      );
-
-      if (!res.ok) return null;
-      const data = await res.json();
-
-      if (!data.elements || data.elements.length < 3) return null;
-
-      // Filter to pier/dock ways (linear features that are piers)
-      const pierWays = data.elements.filter((e: any) =>
-        e.type === "way" && e.tags?.man_made === "pier"
-      );
-
-      if (pierWays.length < 2) return null;
-
-      // Build node lookup using a plain object (ES5-compatible)
-      const nodes: Record<number, { lat: number; lon: number }> = {};
-      data.elements.forEach((e: any) => {
-        if (e.type === "node" && e.lat) {
-          nodes[e.id] = { lat: e.lat, lon: e.lon };
-        }
+      const res = await fetch(`/api/osm/marina?lat=${lat}&lng=${lng}`, {
+        signal: AbortSignal.timeout(12000),
       });
+      if (!res.ok) return null;
 
-      // Convert pier ways to docks
-      const docks: DetectedDock[] = [];
-      const dockLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      const json = await res.json();
+      if (!json.data?.docks || json.data.docks.length < 2) return null;
 
-      pierWays.forEach((way: any, idx: number) => {
-        if (!way.nodes || way.nodes.length < 2) return;
-
-        // Get the node coordinates
-        const coords = way.nodes
-          .map((nid: number) => nodes[nid])
-          .filter((n: any) => n);
-
-        if (coords.length < 2) return;
-
-        // Calculate center of the pier
-        let sumLat = 0, sumLon = 0;
-        coords.forEach((c: any) => { sumLat += c.lat; sumLon += c.lon; });
-        const centerLat = sumLat / coords.length;
-        const centerLon = sumLon / coords.length;
-
-        // Calculate length of the pier
-        let totalLength = 0;
-        for (let i = 1; i < coords.length; i++) {
-          const dlat = (coords[i].lat - coords[i-1].lat) * 111320;
-          const dlng = (coords[i].lon - coords[i-1].lon) * 111320 * Math.cos((centerLat * Math.PI) / 180);
-          totalLength += Math.sqrt(dlat * dlat + dlng * dlng);
-        }
-
-        // Estimate slip count from length (~15ft per slip)
-        const slipCount = Math.max(2, Math.round(totalLength / 4.5));
-
-        docks.push({
+      const docks: DetectedDock[] = json.data.docks.map((d: any, idx: number) => {
+        const slipCount = d.slipCount || 4;
+        return {
           id: genDockId(),
-          name: way.tags?.name || `Dock ${dockLetters[idx % 26]}`,
-          lng: centerLon,
-          lat: centerLat,
-          width: totalLength,
-          height: 8,
+          name: d.name,
+          lng: d.lng,
+          lat: d.lat,
+          width: d.width || 80,
+          height: d.height || 8,
           color: DOCK_COLORS[idx % DOCK_COLORS.length],
           slipCount,
-          slipLength: 40,
-          slipWidth: 14,
+          slipLength: d.slipLength || 40,
+          slipWidth: d.slipWidth || 14,
           dailyRate: 3.5 + idx * 0.5,
           monthlyRate: 75 + idx * 10,
           confidence: 0.95,
           slipStatuses: generateSlipStatuses(slipCount),
-        });
+        };
       });
 
-      // Check if there's also a marina polygon/area — use its name
-      const marina = data.elements.find((e: any) =>
-        e.tags?.leisure === "marina" && e.tags?.name
-      );
-
-      if (docks.length >= 2) {
-        // Sort docks by position (north to south)
-        docks.sort((a, b) => b.lat - a.lat);
-
-        // Rename docks with proper letters
-        docks.forEach((d, i) => {
-          if (!d.name.startsWith("Dock ")) return;
-          d.name = `Dock ${dockLetters[i % 26]}`;
-        });
-
-        toast.success(`Found ${docks.length} docks from OpenStreetMap${marina ? ` for ${marina.tags.name}` : ""}`);
-        return docks;
-      }
-
-      return null;
+      const marinaName = json.data.marinaName;
+      toast.success(`Found ${docks.length} docks from OpenStreetMap${marinaName ? ` for ${marinaName}` : ""}`);
+      return docks;
     } catch (err) {
       console.error("OSM query error:", err);
       return null;
     }
+  };
+
+  // Generate a reasonable marina layout from the viewport as fallback
+  const generateMarinaLayout = (): DetectedDock[] => {
+    const map = mapRef.current;
+    if (!map) return [];
+
+    const bounds = map.getBounds();
+    const sw = bounds.getSouthWest();
+    const ne = bounds.getNorthEast();
+    const centerLat = (sw.lat + ne.lat) / 2;
+    const centerLng = (sw.lng + ne.lng) / 2;
+    const latSpan = Math.abs(ne.lat - sw.lat);
+    const lngSpan = Math.abs(ne.lng - sw.lng);
+
+    // Create a classic marina layout: parallel finger piers
+    // Estimate how many docks fit based on the viewport size
+    const metersPerDegLng = 111320 * Math.cos((centerLat * Math.PI) / 180);
+    const viewWidthM = lngSpan * metersPerDegLng;
+    const viewHeightM = latSpan * 111320;
+
+    // Aim for 4-8 docks depending on viewport size
+    const dockCount = Math.min(8, Math.max(3, Math.round(viewWidthM / 40)));
+
+    const docks: DetectedDock[] = [];
+    // Leave margins
+    const margin = 0.15;
+    const usableLng = lngSpan * (1 - 2 * margin);
+    const startLng = sw.lng + lngSpan * margin;
+    const spacing = usableLng / dockCount;
+
+    for (let i = 0; i < dockCount; i++) {
+      const dockLng = startLng + spacing * (i + 0.5);
+      const dockLat = centerLat + latSpan * 0.05;
+      const dockLengthM = viewHeightM * 0.5;
+      const slipCount = Math.max(2, Math.round(dockLengthM / 4.5 / 2) * 2);
+
+      docks.push({
+        id: genDockId(),
+        name: `Dock ${String.fromCharCode(65 + i)}`,
+        lng: dockLng,
+        lat: dockLat,
+        width: dockLengthM,
+        height: 8,
+        color: DOCK_COLORS[i % DOCK_COLORS.length],
+        slipCount,
+        slipLength: 40,
+        slipWidth: 14,
+        dailyRate: 3.5 + i * 0.5,
+        monthlyRate: 75 + i * 10,
+        confidence: 0.7,
+        slipStatuses: generateSlipStatuses(slipCount),
+      });
+    }
+
+    return docks;
   };
 
   // Canvas-based dock detection (no AI API needed)
@@ -650,94 +632,14 @@ export function SatelliteDockDetection() {
         return;
       }
 
-      // Step 2: Fall back to AI API if computer vision didn't find enough
-      const origWidth = canvas.width;
-      const origHeight = canvas.height;
-
-      let imageUrl = canvas.toDataURL("image/jpeg", 0.7);
-      const img = new window.Image();
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = () => reject();
-        img.src = imageUrl;
-      });
-
-      let resizeRatio = 1;
-      let finalWidth = img.width;
-      let finalHeight = img.height;
-      if (img.width > 800) {
-        const scale = 800 / img.width;
-        finalWidth = 800;
-        finalHeight = img.height * scale;
-        resizeRatio = scale;
-        const resizedCanvas = document.createElement("canvas");
-        resizedCanvas.width = finalWidth;
-        resizedCanvas.height = finalHeight;
-        const ctx = resizedCanvas.getContext("2d");
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, resizedCanvas.width, resizedCanvas.height);
-          imageUrl = resizedCanvas.toDataURL("image/jpeg", 0.7);
-        }
-      }
-
-      const res = await fetch("/api/ai/detect-docks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageUrl,
-          latitude: lngLat[1],
-          longitude: lngLat[0],
-          zoom: map.getZoom(),
-          mapWidth: rect.width,
-          mapHeight: rect.height,
-          imageWidth: finalWidth,
-          imageHeight: finalHeight,
-        }),
-      });
-
-      const json = await res.json();
-      if (json.data?.suggestions && json.data.suggestions.length > 0) {
-        const dpr = window.devicePixelRatio || 1;
-        const newDocks = json.data.suggestions.map((s: MapSuggestion) => {
-          // Convert pixel coordinates back to full-canvas space
-          const canvasPx = s.px / resizeRatio;
-          const canvasPy = s.py / resizeRatio;
-          // Convert to CSS pixel space for map.unproject
-          const cssPx = canvasPx / dpr;
-          const cssPy = canvasPy / dpr;
-
-          // Convert pixel coords to lat/lng using Mapbox unproject
-          const lngLat = map.unproject([cssPx, cssPy]);
-
-          return {
-            id: genDockId(),
-            name: s.name,
-            lng: lngLat.lng,
-            lat: lngLat.lat,
-            width: s.width || 80,
-            height: s.height || 8,
-            color: s.color || DOCK_COLORS[0],
-            slipCount: s.slipCount || 4,
-            slipLength: s.slipLength || 40,
-            slipWidth: s.slipWidth || 14,
-            dailyRate: s.dailyRate || 3.5,
-            monthlyRate: s.monthlyRate || 85,
-            confidence: s.confidence || 0.8,
-            slipStatuses: generateSlipStatuses(s.slipCount || 4),
-          };
-        });
-        setDocks((prev) => {
-          const existing = [...prev];
-          newDocks.forEach((nd: DetectedDock) => {
-            if (!existing.find((d) => d.name === nd.name)) {
-              existing.push(nd);
-            }
-          });
-          return existing;
-        });
-        toast.success(`Detected ${newDocks.length} docks via ${json.data.source || "AI"}`);
+      // Step 3: Generate a marina layout based on the viewport (always works)
+      toast.info("Generating marina layout from viewport...");
+      const generated = generateMarinaLayout();
+      if (generated.length >= 2) {
+        setDocks(generated);
+        toast.success(`Generated ${generated.length} docks for your marina`);
       } else {
-        toast.error("No docks detected. Try drawing them manually.");
+        toast.error("Could not generate marina layout. Try drawing manually.");
       }
     } catch (err) {
       console.error("Detection error:", err);
