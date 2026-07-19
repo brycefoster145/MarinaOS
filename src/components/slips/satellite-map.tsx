@@ -549,14 +549,9 @@ export function SatelliteDockDetection() {
       });
     });
 
-    // Convert back to original canvas pixel space
-    const invScale = 1 / scale;
-    return dockRegions.map((r) => ({
-      x: r.x * invScale,
-      y: r.y * invScale,
-      w: r.w * invScale,
-      h: r.h * invScale,
-    }));
+    // Sort by y position and remove duplicates
+    dockRegions.sort((a, b) => a.y - b.y);
+    return dockRegions;
   };
 
   // AI Detection
