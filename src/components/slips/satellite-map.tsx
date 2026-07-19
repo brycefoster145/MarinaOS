@@ -575,9 +575,7 @@ export function SatelliteDockDetection() {
         </text>
       );
 
-      return <g key={dock.id}>{slips}{walkway}{label}</g>;
-    });
-  };
+     
       return <g key={dock.id}>{slips}{walkway}{label}</g>;
     });
   };
