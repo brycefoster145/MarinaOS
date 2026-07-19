@@ -577,8 +577,18 @@ export function SatelliteDockDetection() {
       const detected = detectDocksFromCanvas(canvas);
       const rect = container.getBoundingClientRect();
 
-      if (detected.length >= 2) {
-        const newDocks: DetectedDock[] = detected.map((d, idx) => {
+      // Deduplicate: same dock detected at different y positions
+      const unique: typeof detected = [];
+      for (const d of detected) {
+        let dup = false;
+        for (const u of unique) {
+          if (Math.abs(d.x - u.x) < 30) { dup = true; break; }
+        }
+        if (!dup) unique.push(d);
+      }
+
+      if (unique.length >= 2) {
+        const newDocks: DetectedDock[] = unique.map((d, idx) => {
           // Convert canvas pixel coords to CSS pixel coords for map.unproject
           const dpr = window.devicePixelRatio || 1;
           const cssPx = d.x / dpr;
