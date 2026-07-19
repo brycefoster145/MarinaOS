@@ -957,11 +957,11 @@ export function SatelliteDockDetection() {
                 fontSize={7}
                 fontWeight={500}
                 fontFamily="monospace"
-                opacity={0.8}
+                opacity={0.9}
                 className="pointer-events-none"
                 style={{ textShadow: "0 1px 2px rgba(0,0,0,0.7)" }}
               >
-                {i + 1}
+                {dock.slipLength}'
               </text>
             )}
           </g>
