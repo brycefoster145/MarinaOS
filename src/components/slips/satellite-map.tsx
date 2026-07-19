@@ -280,6 +280,119 @@ export function SatelliteDockDetection() {
     }
   };
 
+  // Query OpenStreetMap for marina dock data
+  const queryOSMForMarina = async (lat: number, lng: number): Promise<DetectedDock[] | null> => {
+    try {
+      const overpassQuery = `[out:json];
+        (
+          way["man_made"="pier"](around:400,${lat},${lng});
+          way["waterway"="dock"](around:400,${lat},${lng});
+          way["leisure"="marina"](around:400,${lat},${lng});
+          relation["leisure"="marina"](around:400,${lat},${lng});
+        );
+        out body;
+        >;
+        out skel qt;`;
+
+      const res = await fetch(
+        `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`,
+        { headers: { "User-Agent": "MarinaOS/1.0" } }
+      );
+
+      if (!res.ok) return null;
+      const data = await res.json();
+
+      if (!data.elements || data.elements.length < 3) return null;
+
+      // Filter to pier/dock ways (linear features that are piers)
+      const pierWays = data.elements.filter((e: any) =>
+        e.type === "way" && e.tags?.man_made === "pier"
+      );
+
+      if (pierWays.length < 2) return null;
+
+      // Build node lookup
+      const nodes = new Map<number, { lat: number; lon: number }>();
+      data.elements.forEach((e: any) => {
+        if (e.type === "node" && e.lat) {
+          nodes.set(e.id, { lat: e.lat, lon: e.lon });
+        }
+      });
+
+      // Convert pier ways to docks
+      const docks: DetectedDock[] = [];
+      const dockLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+      pierWays.forEach((way: any, idx: number) => {
+        if (!way.nodes || way.nodes.length < 2) return;
+
+        // Get the node coordinates
+        const coords = way.nodes
+          .map((nid: number) => nodes.get(nid))
+          .filter((n: any) => n);
+
+        if (coords.length < 2) return;
+
+        // Calculate center of the pier
+        let sumLat = 0, sumLon = 0;
+        coords.forEach((c: any) => { sumLat += c.lat; sumLon += c.lon; });
+        const centerLat = sumLat / coords.length;
+        const centerLon = sumLon / coords.length;
+
+        // Calculate length of the pier
+        let totalLength = 0;
+        for (let i = 1; i < coords.length; i++) {
+          const dlat = (coords[i].lat - coords[i-1].lat) * 111320;
+          const dlng = (coords[i].lon - coords[i-1].lon) * 111320 * Math.cos((centerLat * Math.PI) / 180);
+          totalLength += Math.sqrt(dlat * dlat + dlng * dlng);
+        }
+
+        // Estimate slip count from length (~15ft per slip)
+        const slipCount = Math.max(2, Math.round(totalLength / 4.5));
+
+        docks.push({
+          id: genDockId(),
+          name: way.tags?.name || `Dock ${dockLetters[idx % 26]}`,
+          lng: centerLon,
+          lat: centerLat,
+          width: totalLength,
+          height: 8,
+          color: DOCK_COLORS[idx % DOCK_COLORS.length],
+          slipCount,
+          slipLength: 40,
+          slipWidth: 14,
+          dailyRate: 3.5 + idx * 0.5,
+          monthlyRate: 75 + idx * 10,
+          confidence: 0.95,
+        });
+      });
+
+      // Check if there's also a marina polygon/area — use its name
+      const marina = data.elements.find((e: any) =>
+        e.tags?.leisure === "marina" && e.tags?.name
+      );
+
+      if (docks.length >= 2) {
+        // Sort docks by position (north to south)
+        docks.sort((a, b) => b.lat - a.lat);
+
+        // Rename docks with proper letters
+        docks.forEach((d, i) => {
+          if (!d.name.startsWith("Dock ")) return;
+          d.name = `Dock ${dockLetters[i % 26]}`;
+        });
+
+        toast.success(`Found ${docks.length} docks from OpenStreetMap${marina ? ` for ${marina.tags.name}` : ""}`);
+        return docks;
+      }
+
+      return null;
+    } catch (err) {
+      console.error("OSM query error:", err);
+      return null;
+    }
+  };
+
   // Canvas-based dock detection (no AI API needed)
   const detectDocksFromCanvas = (canvas: HTMLCanvasElement): { x: number; y: number; w: number; h: number }[] => {
     const ctx = canvas.getContext("2d");
@@ -465,10 +578,18 @@ export function SatelliteDockDetection() {
       if (!map || !container) return;
 
       const canvas = map.getCanvas();
-      const rect = container.getBoundingClientRect();
 
-      // Step 1: Try client-side computer vision detection first
+      // Step 1: Try OpenStreetMap data first (most accurate)
+      const osmDocks = await queryOSMForMarina(lngLat[1], lngLat[0]);
+      if (osmDocks && osmDocks.length >= 2) {
+        setDocks(osmDocks);
+        setIsDetecting(false);
+        return;
+      }
+
+      // Step 2: Try client-side computer vision detection
       const detected = detectDocksFromCanvas(canvas);
+      const rect = container.getBoundingClientRect();
 
       if (detected.length >= 2) {
         const newDocks: DetectedDock[] = detected.map((d, idx) => {
