@@ -904,16 +904,36 @@ export function SatelliteDockDetection() {
           sh = slipWidthPx;
         }
 
+        // Only show slip number if slip is big enough
+        const showNumber = slipWidthPx > 12;
+
         slips.push(
-          <rect
-            key={`slip-${dock.id}-${i}`}
-            x={sx} y={sy} width={sw} height={sh} rx={2}
-            fill={dock.color}
-            fillOpacity={isSelected ? 0.7 : 0.45}
-            stroke={dock.color} strokeWidth={1}
-            className="cursor-pointer"
-            onClick={() => setSelectedDockId(dock.id)}
-          />
+          <g key={`slip-${dock.id}-${i}`}>
+            <rect
+              x={sx} y={sy} width={sw} height={sh} rx={2}
+              fill={dock.color}
+              fillOpacity={isSelected ? 0.7 : 0.45}
+              stroke={dock.color} strokeWidth={1}
+              className="cursor-pointer"
+              onClick={() => setSelectedDockId(dock.id)}
+            />
+            {showNumber && (
+              <text
+                x={isHorizontal ? sx + sw / 2 : sx + sw / 2}
+                y={isHorizontal ? sy + sh / 2 + 3 : sy + sh / 2 + 3}
+                textAnchor="middle"
+                fill="white"
+                fontSize={7}
+                fontWeight={500}
+                fontFamily="monospace"
+                opacity={0.8}
+                className="pointer-events-none"
+                style={{ textShadow: "0 1px 2px rgba(0,0,0,0.7)" }}
+              >
+                {i + 1}
+              </text>
+            )}
+          </g>
         );
       }
 
@@ -926,25 +946,41 @@ export function SatelliteDockDetection() {
           height={isHorizontal ? walkwayWidthPx : halfHPx * 2}
           rx={3}
           fill={dock.color}
-          fillOpacity={isSelected ? 0.8 : 0.6}
-          stroke={isSelected ? "#ffffff" : dock.color}
-          strokeWidth={isSelected ? 2 : 1.5}
+          fillOpacity={isSelected ? 0.9 : 0.7}
+          stroke={isSelected ? "#ffffff" : "rgba(255,255,255,0.4)"}
+          strokeWidth={isSelected ? 2 : 1}
           className="cursor-pointer"
           onClick={() => setSelectedDockId(dock.id)}
         />
       );
 
-      // Label
+      // Label with background badge
+      const labelBgWidth = dock.name.length * 8 + 20;
       const label = (
-        <text
-          x={center.x} y={center.y + 4}
-          textAnchor="middle"
-          fill="white" fontSize={12} fontWeight={700}
-          style={{ textShadow: "0 1px 3px rgba(0,0,0,0.8)" }}
-          className="pointer-events-none"
-        >
-          {dock.name} ({dock.slipCount})
-        </text>
+        <g className="pointer-events-none">
+          <rect
+            x={center.x - labelBgWidth / 2}
+            y={center.y - 14}
+            width={labelBgWidth}
+            height={24}
+            rx={4}
+            fill={dock.color}
+            fillOpacity={0.85}
+            stroke="rgba(255,255,255,0.5)"
+            strokeWidth={1}
+          />
+          <text
+            x={center.x}
+            y={center.y + 4}
+            textAnchor="middle"
+            fill="white"
+            fontSize={12}
+            fontWeight={700}
+            fontFamily="system-ui"
+          >
+            {dock.name}
+          </text>
+        </g>
       );
 
      
