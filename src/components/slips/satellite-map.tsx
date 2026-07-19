@@ -334,11 +334,11 @@ export function SatelliteDockDetection() {
 
       if (pierWays.length < 2) return null;
 
-      // Build node lookup
-      const nodes = new Map<number, { lat: number; lon: number }>();
+      // Build node lookup using a plain object (ES5-compatible)
+      const nodes: Record<number, { lat: number; lon: number }> = {};
       data.elements.forEach((e: any) => {
         if (e.type === "node" && e.lat) {
-          nodes.set(e.id, { lat: e.lat, lon: e.lon });
+          nodes[e.id] = { lat: e.lat, lon: e.lon };
         }
       });
 
@@ -351,7 +351,7 @@ export function SatelliteDockDetection() {
 
         // Get the node coordinates
         const coords = way.nodes
-          .map((nid: number) => nodes.get(nid))
+          .map((nid: number) => nodes[nid])
           .filter((n: any) => n);
 
         if (coords.length < 2) return;
