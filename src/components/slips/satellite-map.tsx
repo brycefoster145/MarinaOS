@@ -23,6 +23,8 @@ interface DetectedDock {
   confidence?: number;
   /** Per-slip status: AVAILABLE, OCCUPIED, RESERVED, MAINTENANCE, UNAVAILABLE */
   slipStatuses?: string[];
+  /** Per-slip custom sizes (overrides slipLength/slipWidth per slip) */
+  slipSizes?: { length: number; width: number }[];
 }
 
 interface MapSuggestion {
@@ -68,6 +70,14 @@ function generateSlipStatuses(count: number): string[] {
     else statuses.push("RESERVED");
   }
   return statuses;
+}
+
+function generateSlipSizes(count: number, defaultLength: number, defaultWidth: number): { length: number; width: number }[] {
+  const sizes: { length: number; width: number }[] = [];
+  for (let i = 0; i < count; i++) {
+    sizes.push({ length: defaultLength, width: defaultWidth });
+  }
+  return sizes;
 }
 
 let dockIdCounter = 0;
@@ -781,11 +791,11 @@ export function SatelliteDockDetection() {
       const walkwayWidthPx = Math.min(isHorizontal ? halfHPx * 2 : halfWPx * 2, 12);
 
       // Slip dimensions in pixels
-      const slipWidthPx = walkwayLengthPx / dock.slipCount * 0.8;
+      const slipWidthPx = dock.slipCount > 0 ? walkwayLengthPx / dock.slipCount * 0.8 : 0;
       const slipLengthPx = Math.max(isHorizontal ? halfHPx * 2 - walkwayWidthPx : halfWPx * 2 - walkwayWidthPx, 8);
 
       const slipsPerSide = Math.ceil(dock.slipCount / 2);
-      const slipSpacing = walkwayLengthPx / (slipsPerSide + 1);
+      const slipSpacing = walkwayLengthPx / (Math.max(slipsPerSide, 1) + 1);
 
       const slips: JSX.Element[] = [];
       for (let i = 0; i < dock.slipCount; i++) {
@@ -835,7 +845,9 @@ export function SatelliteDockDetection() {
                 className="pointer-events-none"
                 style={{ textShadow: "0 1px 2px rgba(0,0,0,0.7)" }}
               >
-                {dock.slipLength}'×{dock.slipWidth}'
+                {dock.slipSizes?.[i]
+                  ? `${dock.slipSizes[i].length}'×${dock.slipSizes[i].width}'`
+                  : `${dock.slipLength}'×${dock.slipWidth}'`}
               </text>
             )}
           </g>
@@ -1098,18 +1110,44 @@ export function SatelliteDockDetection() {
                     <label className="text-xs font-medium mb-1 block">Slip Count</label>
                     <Input
                       type="number"
-                      min={1}
+                      min={0}
                       value={selectedDock.slipCount}
-                      onChange={(e) => updateDock(selectedDock.id, "slipCount", parseInt(e.target.value) || 1)}
+                      onChange={(e) => {
+                        const count = parseInt(e.target.value) || 0;
+                        updateDock(selectedDock.id, "slipCount", count);
+                        // Sync slipSizes array when count changes
+                        setDocks((prev) => prev.map((d) => {
+                          if (d.id !== selectedDock.id) return d;
+                          const currentSizes = d.slipSizes || generateSlipSizes(d.slipCount, d.slipLength, d.slipWidth);
+                          if (count > currentSizes.length) {
+                            // Add new slips with default sizes
+                            const extras = generateSlipSizes(count - currentSizes.length, d.slipLength, d.slipWidth);
+                            return { ...d, slipSizes: [...currentSizes, ...extras], slipCount: count };
+                          } else if (count < currentSizes.length) {
+                            return { ...d, slipSizes: currentSizes.slice(0, count), slipCount: count };
+                          }
+                          return { ...d, slipCount: count };
+                        }));
+                      }}
                       className="h-9 text-sm"
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-medium mb-1 block">Slip Length (ft)</label>
+                    <label className="text-xs font-medium mb-1 block">Default Size (ft)</label>
                     <Input
                       type="number"
                       value={selectedDock.slipLength}
-                      onChange={(e) => updateDock(selectedDock.id, "slipLength", parseFloat(e.target.value) || 20)}
+                      min={0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        updateDock(selectedDock.id, "slipLength", val);
+                        // Update all slipSizes to match new default
+                        setDocks((prev) => prev.map((d) => {
+                          if (d.id !== selectedDock.id) return d;
+                          const sizes = d.slipSizes?.map(s => ({ ...s, length: val })) || [];
+                          return { ...d, slipSizes: sizes };
+                        }));
+                      }}
                       className="h-9 text-sm"
                     />
                   </div>
@@ -1134,6 +1172,54 @@ export function SatelliteDockDetection() {
                     />
                   </div>
                 </div>
+                {selectedDock.slipCount > 0 && (
+                  <div>
+                    <label className="text-xs font-medium mb-1 block">Per-Slip Sizes</label>
+                    <div className="max-h-32 overflow-y-auto space-y-1 pr-1">
+                      {(() => {
+                        const sizes = selectedDock.slipSizes ||
+                          generateSlipSizes(selectedDock.slipCount, selectedDock.slipLength, selectedDock.slipWidth);
+                        return sizes.map((s, i) => (
+                          <div key={i} className="flex items-center gap-1.5 text-xs">
+                            <span className="w-6 text-muted-foreground shrink-0">#{i+1}</span>
+                            <input
+                              type="number"
+                              value={s.length}
+                              min={0}
+                              className="w-16 h-7 rounded-md border border-border bg-background px-2 text-xs font-mono"
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                setDocks((prev) => prev.map((d) => {
+                                  if (d.id !== selectedDock.id) return d;
+                                  const newSizes = [...(d.slipSizes || generateSlipSizes(d.slipCount, d.slipLength, d.slipWidth))];
+                                  newSizes[i] = { ...newSizes[i], length: val };
+                                  return { ...d, slipSizes: newSizes };
+                                }));
+                              }}
+                            />
+                            <span className="text-muted-foreground">×</span>
+                            <input
+                              type="number"
+                              value={s.width}
+                              min={0}
+                              className="w-14 h-7 rounded-md border border-border bg-background px-2 text-xs font-mono"
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                setDocks((prev) => prev.map((d) => {
+                                  if (d.id !== selectedDock.id) return d;
+                                  const newSizes = [...(d.slipSizes || generateSlipSizes(d.slipCount, d.slipLength, d.slipWidth))];
+                                  newSizes[i] = { ...newSizes[i], width: val };
+                                  return { ...d, slipSizes: newSizes };
+                                }));
+                              }}
+                            />
+                            <span className="text-muted-foreground">ft</span>
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                  </div>
+                )}
                 {selectedDock.confidence && (
                   <div className="flex items-center justify-between p-2 rounded-lg bg-secondary/30">
                     <span className="text-xs text-muted-foreground">AI Confidence</span>
