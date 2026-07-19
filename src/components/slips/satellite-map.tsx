@@ -577,14 +577,21 @@ export function SatelliteDockDetection() {
       const detected = detectDocksFromCanvas(canvas);
       const rect = container.getBoundingClientRect();
 
-      // Deduplicate: same dock detected at different y positions
+      // Deduplicate: merge nearby bright strips into one dock
+      const mergeThreshold = 80; // pixels - merge strips within this distance
       const unique: typeof detected = [];
       for (const d of detected) {
-        let dup = false;
+        let merged = false;
         for (const u of unique) {
-          if (Math.abs(d.x - u.x) < 30) { dup = true; break; }
+          if (Math.abs(d.x - u.x) < mergeThreshold) {
+            // Merge: average their positions, combine widths
+            u.x = (u.x + d.x) / 2;
+            u.w = Math.max(u.w, d.w);
+            merged = true;
+            break;
+          }
         }
-        if (!dup) unique.push(d);
+        if (!merged) unique.push({ ...d });
       }
 
       if (unique.length >= 2) {
