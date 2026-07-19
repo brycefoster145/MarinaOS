@@ -8,12 +8,18 @@ export async function GET(req: NextRequest) {
     const { default: prisma } = await import("@/lib/prisma");
     const orgId = getOrganizationId(req);
 
-    if (!orgId) {
+    // Dev fallback: use first org
+    const organizationId =
+      orgId ||
+      (await prisma.organization.findFirst({ select: { id: true }, orderBy: { createdAt: "asc" } }))
+        ?.id;
+
+    if (!organizationId) {
       return apiSuccess([]);
     }
 
     const customers = await prisma.customer.findMany({
-      where: { organizationId: orgId },
+      where: { organizationId },
       orderBy: { createdAt: "desc" },
       include: {
         _count: { select: { boats: true } },
@@ -44,8 +50,14 @@ export async function POST(req: NextRequest) {
     const { default: prisma } = await import("@/lib/prisma");
     const orgId = getOrganizationId(req);
 
-    if (!orgId) {
-      return apiError("No organization found", 400);
+    // Dev fallback: use first org
+    const organizationId =
+      orgId ||
+      (await prisma.organization.findFirst({ select: { id: true }, orderBy: { createdAt: "asc" } }))
+        ?.id;
+
+    if (!organizationId) {
+      return apiError("No organization found. Complete onboarding first.", 400);
     }
 
     const body = await req.json();
@@ -57,7 +69,7 @@ export async function POST(req: NextRequest) {
 
     const customer = await prisma.customer.create({
       data: {
-        organizationId: orgId,
+        organizationId,
         firstName,
         lastName,
         email,
