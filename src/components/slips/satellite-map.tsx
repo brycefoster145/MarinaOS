@@ -343,7 +343,7 @@ export function SatelliteDockDetection() {
     }
   };
 
-  // Generate a reasonable marina layout from the viewport as fallback
+  // Generate a marina layout that fills the viewport
   const generateMarinaLayout = (): DetectedDock[] => {
     const map = mapRef.current;
     if (!map) return [];
@@ -351,38 +351,35 @@ export function SatelliteDockDetection() {
     const bounds = map.getBounds();
     const sw = bounds.getSouthWest();
     const ne = bounds.getNorthEast();
-    const centerLat = (sw.lat + ne.lat) / 2;
-    const centerLng = (sw.lng + ne.lng) / 2;
     const latSpan = Math.abs(ne.lat - sw.lat);
     const lngSpan = Math.abs(ne.lng - sw.lng);
 
-    // Create a classic marina layout: parallel finger piers
-    // Estimate how many docks fit based on the viewport size
-    const metersPerDegLng = 111320 * Math.cos((centerLat * Math.PI) / 180);
-    const viewWidthM = lngSpan * metersPerDegLng;
-    const viewHeightM = latSpan * 111320;
-
-    // Aim for 4-8 docks depending on viewport size
-    const dockCount = Math.min(8, Math.max(3, Math.round(viewWidthM / 40)));
+    // Create parallel finger piers filling the viewport
+    // Aim for 3-10 docks depending on viewport width
+    const dockCount = Math.min(10, Math.max(3, Math.round(lngSpan / 0.0003)));
 
     const docks: DetectedDock[] = [];
-    // Leave margins
-    const margin = 0.15;
+    // Leave 10% margin on each side
+    const margin = 0.1;
     const usableLng = lngSpan * (1 - 2 * margin);
     const startLng = sw.lng + lngSpan * margin;
     const spacing = usableLng / dockCount;
 
+    // Dock length: 60% of viewport height, centered
+    const dockLengthDeg = latSpan * 0.6;
+    const dockCenterLat = (sw.lat + ne.lat) / 2;
+
     for (let i = 0; i < dockCount; i++) {
       const dockLng = startLng + spacing * (i + 0.5);
-      const dockLat = centerLat + latSpan * 0.05;
-      const dockLengthM = viewHeightM * 0.5;
+      const metersPerDegLng = 111320 * Math.cos((dockCenterLat * Math.PI) / 180);
+      const dockLengthM = dockLengthDeg * 111320;
       const slipCount = Math.max(2, Math.round(dockLengthM / 4.5 / 2) * 2);
 
       docks.push({
         id: genDockId(),
         name: `Dock ${String.fromCharCode(65 + i)}`,
         lng: dockLng,
-        lat: dockLat,
+        lat: dockCenterLat,
         width: dockLengthM,
         height: 8,
         color: DOCK_COLORS[i % DOCK_COLORS.length],
@@ -400,7 +397,7 @@ export function SatelliteDockDetection() {
   };
 
   // Canvas-based dock detection (no AI API needed)
-  // Simple grid-based dock detection from canvas
+  // Color-based dock detection from canvas
   const detectDocksFromCanvas = (canvas: HTMLCanvasElement): { x: number; y: number; w: number; h: number }[] => {
     const ctx = canvas.getContext("2d");
     if (!ctx) return [];
@@ -409,129 +406,94 @@ export function SatelliteDockDetection() {
     const h = canvas.height;
     const imageData = ctx.getImageData(0, 0, w, h);
     const data = imageData.data;
-    // Use a downsampled version for speed
-    const gridSize = 20;
+
+    // Downsample to a grid for faster processing
+    const gridSize = 24;
     const cellW = Math.max(1, Math.floor(w / gridSize));
     const cellH = Math.max(1, Math.floor(h / gridSize));
 
-    // Calculate average brightness for each grid cell
+    // Classify each grid cell: 0=water, 1=dock, 2=other
     const grid: number[] = [];
     for (let gy = 0; gy < gridSize; gy++) {
       for (let gx = 0; gx < gridSize; gx++) {
-        let sum = 0, count = 0;
+        let rSum = 0, gSum = 0, bSum = 0, count = 0;
         for (let py = gy * cellH; py < (gy + 1) * cellH && py < h; py++) {
           for (let px = gx * cellW; px < (gx + 1) * cellW && px < w; px++) {
             const idx = (py * w + px) * 4;
-            sum += data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
+            rSum += data[idx];
+            gSum += data[idx + 1];
+            bSum += data[idx + 2];
             count++;
           }
         }
-        grid.push(count > 0 ? sum / count : 0);
+        if (count === 0) { grid.push(2); continue; }
+        const r = rSum / count, g = gSum / count, b = bSum / count;
+        const brightness = (r + g + b) / 3;
+        // Water: dark blue (low R, low G, medium B, low brightness)
+        const isWater = b > r * 1.3 && b > g * 1.2 && brightness < 120;
+        // Dock: bright gray/white (high R, G, B)
+        const isDock = brightness > 150 && r > 120 && g > 120 && b > 120;
+        grid.push(isDock ? 1 : isWater ? 0 : 2);
       }
     }
 
-    // Find the water brightness level (most common dark value)
-    const sorted = [...grid].sort((a, b) => a - b);
-    const waterBrightness = sorted[Math.floor(sorted.length * 0.4)]; // 40th percentile
-
-    // A dock cell is one that's significantly brighter than water
-    const threshold = waterBrightness + 30;
-    const dockCells = grid.map((v) => v > threshold ? 1 : 0);
-
-    // Find horizontal dock strips (rows of bright cells)
+    // Find dock regions (connected bright cells)
     const dockRegions: { x: number; y: number; w: number; h: number }[] = [];
-    const visited = new Set<number>();
+    const visited: boolean[] = new Array(gridSize * gridSize).fill(false);
 
     for (let gy = 0; gy < gridSize; gy++) {
       for (let gx = 0; gx < gridSize; gx++) {
         const idx = gy * gridSize + gx;
-        if (dockCells[idx] !== 1 || visited.has(idx)) continue;
+        if (grid[idx] !== 1 || visited[idx]) continue;
 
-        // Found a dock cell — expand horizontally
-        let minX = gx, maxX = gx;
-        let minY = gy, maxY = gy;
-        visited.add(idx);
+        // Flood fill to find connected dock cells
+        const stack: number[] = [idx];
+        let minX = gx, maxX = gx, minY = gy, maxY = gy;
+        visited[idx] = true;
 
-        // Expand right
-        for (let ex = gx + 1; ex < gridSize; ex++) {
-          const eidx = gy * gridSize + ex;
-          if (dockCells[eidx] === 1) {
-            maxX = ex;
-            visited.add(eidx);
-          } else break;
-        }
+        while (stack.length > 0) {
+          const cur = stack.pop()!;
+          const cy = Math.floor(cur / gridSize);
+          const cx = cur % gridSize;
+          minX = Math.min(minX, cx);
+          maxX = Math.max(maxX, cx);
+          minY = Math.min(minY, cy);
+          maxY = Math.max(maxY, cy);
 
-        // Expand down
-        for (let ey = gy + 1; ey < gridSize; ey++) {
-          let allBright = true;
-          for (let ex = minX; ex <= maxX; ex++) {
-            const eidx = ey * gridSize + ex;
-            if (dockCells[eidx] !== 1) { allBright = false; break; }
+          // Check 4 neighbors
+          const neighbors = [
+            cy > 0 ? cur - gridSize : -1,
+            cy < gridSize - 1 ? cur + gridSize : -1,
+            cx > 0 ? cur - 1 : -1,
+            cx < gridSize - 1 ? cur + 1 : -1,
+          ];
+          for (const n of neighbors) {
+            if (n >= 0 && grid[n] === 1 && !visited[n]) {
+              visited[n] = true;
+              stack.push(n);
+            }
           }
-          if (allBright) {
-            maxY = ey;
-            for (let ex = minX; ex <= maxX; ex++) visited.add(ey * gridSize + ex);
-          } else break;
         }
 
-        const regionW = (maxX - minX + 1) * cellW;
-        const regionH = (maxY - minY + 1) * cellH;
-        // Filter: docks are long and thin (width > 2x height)
-        if (regionW > regionH * 2 && regionW > cellW * 2) {
+        const rw = (maxX - minX + 1) * cellW;
+        const rh = (maxY - minY + 1) * cellH;
+        // Filter: docks should be long and thin (width > 2x height or height > 2x width)
+        if (rw > rh * 2 && rw > cellW * 3) {
           dockRegions.push({
             x: (minX + maxX) / 2 * cellW + cellW / 2,
             y: (minY + maxY) / 2 * cellH + cellH / 2,
-            w: regionW,
-            h: regionH,
+            w: rw, h: rh,
           });
-        }
-      }
-    }
-
-    // Also find vertical docks
-    for (let gx = 0; gx < gridSize; gx++) {
-      for (let gy = 0; gy < gridSize; gy++) {
-        const idx = gy * gridSize + gx;
-        if (dockCells[idx] !== 1 || visited.has(idx)) continue;
-
-        let minY = gy, maxY = gy;
-        visited.add(idx);
-
-        // Expand down
-        for (let ey = gy + 1; ey < gridSize; ey++) {
-          const eidx = ey * gridSize + gx;
-          if (dockCells[eidx] === 1) {
-            maxY = ey;
-            visited.add(eidx);
-          } else break;
-        }
-
-        // Expand right
-        for (let ex = gx + 1; ex < gridSize; ex++) {
-          let allBright = true;
-          for (let ey = minY; ey <= maxY; ey++) {
-            const eidx = ey * gridSize + ex;
-            if (dockCells[eidx] !== 1) { allBright = false; break; }
-          }
-          if (allBright) {
-            for (let ey = minY; ey <= maxY; ey++) visited.add(ey * gridSize + ex);
-          } else break;
-        }
-
-        const regionW = cellW;
-        const regionH = (maxY - minY + 1) * cellH;
-        if (regionH > regionW * 2 && regionH > cellH * 2) {
+        } else if (rh > rw * 2 && rh > cellH * 3) {
           dockRegions.push({
-            x: gx * cellW + cellW / 2,
+            x: (minX + maxX) / 2 * cellW + cellW / 2,
             y: (minY + maxY) / 2 * cellH + cellH / 2,
-            w: regionW,
-            h: regionH,
+            w: rw, h: rh,
           });
         }
       }
     }
 
-    // Sort by y position
     dockRegions.sort((a, b) => a.y - b.y);
     return dockRegions;
   };
