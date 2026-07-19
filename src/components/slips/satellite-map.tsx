@@ -336,15 +336,18 @@ export function SatelliteDockDetection() {
 
       const marinaName = json.data.marinaName;
 
-      // Merge nearby OSM piers into logical docks (finger piers are individual OSM ways)
+      // Merge OSM piers that are overlapping segments of the same physical dock
+      // (not finger piers at the same longitude — those are separate docks)
       const mergedDocks: DetectedDock[] = [];
       for (const dock of docks) {
         let wasMerged = false;
         for (const m of mergedDocks) {
-          // Merge if within 30m of each other (same dock structure)
           const metersPerDegLng = 111320 * Math.cos((dock.lat * Math.PI) / 180);
-          const distM = Math.abs(dock.lng - m.lng) * metersPerDegLng;
-          if (distM < 30) {
+          const metersPerDegLat = 111320;
+          const distLngM = Math.abs(dock.lng - m.lng) * metersPerDegLng;
+          const distLatM = Math.abs(dock.lat - m.lat) * metersPerDegLat;
+          // Only merge if very close in BOTH lat and lng (< 5m = overlapping/same pier)
+          if (distLngM < 5 && distLatM < 5) {
             // Average positions, combine slip counts
             m.lng = (m.lng + dock.lng) / 2;
             m.lat = (m.lat + dock.lat) / 2;
