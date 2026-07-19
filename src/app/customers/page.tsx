@@ -1,39 +1,81 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AppShell } from "@/components/layout/app-shell";
 import { GlassCard, StatsCard } from "@/components/ui/glass-card";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalContent, ModalHeader, ModalTitle, ModalDescription, ModalFooter, ModalClose } from "@/components/ui/modal";
 import { Input } from "@/components/ui/input";
 import { CustomerTable } from "@/components/customers/customer-table";
-import { Users, UserPlus, Ship, DollarSign, TrendingUp } from "lucide-react";
+import { Users, UserPlus, Ship, DollarSign, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
-// Sample data
-const sampleCustomers = [
-  { id: "c1", firstName: "Robert", lastName: "Chen", email: "robert.chen@example.com", phone: "(949) 555-0123", boatCount: 2, totalSpent: 28450, lastVisit: "2025-07-15", status: "active" as const },
-  { id: "c2", firstName: "Sarah", lastName: "Miller", email: "sarah.miller@example.com", phone: "(949) 555-0456", boatCount: 1, totalSpent: 15200, lastVisit: "2025-07-10", status: "active" as const },
-  { id: "c3", firstName: "James", lastName: "Wilson", email: "james.wilson@example.com", phone: "(714) 555-0789", boatCount: 1, totalSpent: 8900, lastVisit: "2025-06-28", status: "active" as const },
-  { id: "c4", firstName: "Emily", lastName: "Davis", email: "emily.davis@example.com", phone: "(949) 555-0234", boatCount: 3, totalSpent: 42100, lastVisit: "2025-07-18", status: "active" as const },
-  { id: "c5", firstName: "Michael", lastName: "Brown", email: "michael.brown@example.com", phone: "(562) 555-0567", boatCount: 1, totalSpent: 3200, lastVisit: "2025-05-20", status: "inactive" as const },
-  { id: "c6", firstName: "Jessica", lastName: "Taylor", email: "jessica.taylor@example.com", phone: "(949) 555-0890", boatCount: 2, totalSpent: 18900, lastVisit: "2025-07-12", status: "active" as const },
-  { id: "c7", firstName: "David", lastName: "Anderson", email: "david.anderson@example.com", phone: "(714) 555-0124", boatCount: 1, totalSpent: 6700, lastVisit: "2025-06-05", status: "active" as const },
-  { id: "c8", firstName: "Lisa", lastName: "Martinez", email: "lisa.martinez@example.com", phone: "(949) 555-0457", boatCount: 2, totalSpent: 25600, lastVisit: "2025-07-14", status: "active" as const },
-];
+interface CustomerRow {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+  boatCount: number;
+  totalSpent: number | null;
+  lastVisit: string | null;
+  status: "active" | "inactive";
+}
 
 export default function CustomersPage() {
+  const [customers, setCustomers] = useState<CustomerRow[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showAddCustomer, setShowAddCustomer] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ firstName: "", lastName: "", email: "", phone: "" });
 
-  const totalCustomers = sampleCustomers.length;
-  const activeCustomers = sampleCustomers.filter(c => c.status === "active").length;
-  const totalBoats = sampleCustomers.reduce((sum, c) => sum + c.boatCount, 0);
-  const totalRevenue = sampleCustomers.reduce((sum, c) => sum + (c.totalSpent || 0), 0);
+  useEffect(() => {
+    async function fetchCustomers() {
+      try {
+        const res = await fetch("/api/customers");
+        if (res.ok) {
+          const json = await res.json();
+          setCustomers(json.data || json || []);
+        }
+      } catch (e) {
+        console.error("Failed to load customers", e);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchCustomers();
+  }, []);
 
-  const handleAddCustomer = () => {
-    console.log("Add customer:", newCustomer);
-    setShowAddCustomer(false);
-    setNewCustomer({ firstName: "", lastName: "", email: "", phone: "" });
+  const totalCustomers = customers.length;
+  const activeCustomers = customers.filter(c => c.status === "active").length;
+  const totalBoats = customers.reduce((sum, c) => sum + c.boatCount, 0);
+
+  const handleAddCustomer = async () => {
+    if (!newCustomer.firstName || !newCustomer.lastName || !newCustomer.email) {
+      toast.error("First name, last name, and email are required");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newCustomer),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to save");
+      }
+      const json = await res.json();
+      setCustomers((prev) => [json.data || json, ...prev]);
+      setShowAddCustomer(false);
+      setNewCustomer({ firstName: "", lastName: "", email: "", phone: "" });
+      toast.success("Customer added successfully");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to add customer");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -54,17 +96,23 @@ export default function CustomersPage() {
         {/* Stats */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatsCard label="Total Customers" value={totalCustomers.toString()} icon={<Users className="h-4 w-4" />} />
-          <StatsCard label="Active" value={activeCustomers.toString()} change={`${Math.round((activeCustomers / totalCustomers) * 100)}%`} changeType="positive" icon={<Users className="h-4 w-4" />} />
+          <StatsCard label="Active" value={activeCustomers.toString()} change={totalCustomers > 0 ? `${Math.round((activeCustomers / totalCustomers) * 100)}%` : "—"} changeType="positive" icon={<Users className="h-4 w-4" />} />
           <StatsCard label="Total Boats" value={totalBoats.toString()} icon={<Ship className="h-4 w-4" />} />
-          <StatsCard label="Total Revenue" value={`$${(totalRevenue / 1000).toFixed(1)}K`} change="+12.5%" changeType="positive" icon={<DollarSign className="h-4 w-4" />} />
+          <StatsCard label="Total Revenue" value="$0" icon={<DollarSign className="h-4 w-4" />} />
         </div>
 
         {/* Customer Table */}
         <GlassCard className="p-5" hover={false}>
-          <CustomerTable
-            customers={sampleCustomers}
-            onAddCustomer={() => setShowAddCustomer(true)}
-          />
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <CustomerTable
+              customers={customers}
+              onAddCustomer={() => setShowAddCustomer(true)}
+            />
+          )}
         </GlassCard>
 
         {/* Add Customer Modal */}
@@ -103,12 +151,11 @@ export default function CustomersPage() {
                 />
               </div>
               <div>
-                <label className="text-sm font-medium mb-1.5 block">Phone</label>
+                <label className="text-sm font-medium mb-1.5 block">Phone (optional)</label>
                 <Input
-                  type="tel"
                   value={newCustomer.phone}
                   onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
-                  placeholder="(555) 123-4567"
+                  placeholder="(949) 555-0000"
                 />
               </div>
             </div>
@@ -116,8 +163,8 @@ export default function CustomersPage() {
               <ModalClose asChild>
                 <Button variant="outline">Cancel</Button>
               </ModalClose>
-              <Button onClick={handleAddCustomer} disabled={!newCustomer.firstName || !newCustomer.lastName || !newCustomer.email}>
-                Add Customer
+              <Button onClick={handleAddCustomer} loading={saving}>
+                {saving ? "Saving..." : "Add Customer"}
               </Button>
             </ModalFooter>
           </ModalContent>
