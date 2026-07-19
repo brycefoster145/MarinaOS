@@ -84,3 +84,47 @@ export async function GET(
     return apiError("Failed to load customer", 500);
   }
 }
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const { default: prisma } = await import("@/lib/prisma");
+    const body = await req.json();
+    const allowed = ["firstName", "lastName", "email", "phone", "address", "city", "state", "zipCode", "notes", "isActive"];
+    const updateData: Record<string, any> = {};
+
+    for (const key of allowed) {
+      if (body[key] !== undefined) {
+        updateData[key] = body[key];
+      }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return apiError("No valid fields to update", 400);
+    }
+
+    const customer = await prisma.customer.update({
+      where: { id: params.id },
+      data: updateData,
+    });
+
+    return apiSuccess({
+      id: customer.id,
+      firstName: customer.firstName,
+      lastName: customer.lastName,
+      email: customer.email,
+      phone: customer.phone,
+      address: customer.address,
+      city: customer.city,
+      state: customer.state,
+      zipCode: customer.zipCode,
+      notes: customer.notes,
+      isActive: customer.isActive,
+    });
+  } catch (error) {
+    console.error("Customer update error:", error);
+    return apiError("Failed to update customer", 500);
+  }
+}

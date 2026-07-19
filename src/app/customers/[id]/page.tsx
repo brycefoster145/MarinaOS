@@ -5,13 +5,15 @@ import { AppShell } from "@/components/layout/app-shell";
 import { GlassCard, StatsCard } from "@/components/ui/glass-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { BoatManager } from "@/components/customers/boat-manager";
-import { Mail, Phone, MapPin, Calendar, Anchor, DollarSign, FileText, ArrowLeft, Ship, Download, Loader2 } from "lucide-react";
+import { Mail, Phone, MapPin, Calendar, Anchor, DollarSign, FileText, ArrowLeft, Ship, Download, Loader2, Pencil, Check, X } from "lucide-react";
 import Link from "next/link";
 import { formatDate, formatCurrency } from "@/lib/utils";
+import { toast } from "sonner";
 
 interface CustomerDetail {
   id: string;
@@ -36,6 +38,9 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     async function fetchCustomer() {
@@ -82,6 +87,44 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
 
   const nextReservation = customer.reservations.find(r => r.status === "CONFIRMED");
 
+  const startEdit = () => {
+    setEditForm({
+      email: customer.email,
+      phone: customer.phone || "",
+      address: customer.address || "",
+      city: customer.city || "",
+      state: customer.state || "",
+      zipCode: customer.zipCode || "",
+      notes: customer.notes || "",
+    });
+    setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    setEditing(false);
+    setEditForm({});
+  };
+
+  const saveEdit = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/customers/${params.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editForm),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      const json = await res.json();
+      setCustomer((prev) => prev ? { ...prev, ...json.data } : prev);
+      setEditing(false);
+      toast.success("Customer updated");
+    } catch (err) {
+      toast.error("Failed to update customer");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <AppShell>
       <div className="p-4 sm:p-6 lg:p-8 space-y-6">
@@ -115,34 +158,71 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
           <StatsCard label="Next Visit" value={nextReservation ? formatDate(nextReservation.startDate) : "None"} icon={<Calendar className="h-4 w-4" />} />
         </div>
 
+        {/* Edit button */}
+        <div className="flex justify-end">
+          {editing ? (
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={cancelEdit}>
+                <X className="h-4 w-4 mr-1.5" /> Cancel
+              </Button>
+              <Button size="sm" onClick={saveEdit} loading={saving}>
+                <Check className="h-4 w-4 mr-1.5" /> Save
+              </Button>
+            </div>
+          ) : (
+            <Button variant="outline" size="sm" onClick={startEdit}>
+              <Pencil className="h-4 w-4 mr-1.5" /> Edit
+            </Button>
+          )}
+        </div>
+
         {/* Contact Info */}
         <GlassCard className="p-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="flex items-center gap-3">
-              <Mail className="h-5 w-5 text-muted-foreground" />
-              <div>
+              <Mail className="h-5 w-5 text-muted-foreground shrink-0" />
+              <div className="min-w-0 flex-1">
                 <p className="text-xs text-muted-foreground">Email</p>
-                <p className="text-sm font-medium">{customer.email}</p>
+                {editing ? (
+                  <Input value={editForm.email} onChange={(e) => setEditForm({...editForm, email: e.target.value})} className="h-8 text-sm" />
+                ) : (
+                  <p className="text-sm font-medium truncate">{customer.email}</p>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <Phone className="h-5 w-5 text-muted-foreground" />
-              <div>
+              <Phone className="h-5 w-5 text-muted-foreground shrink-0" />
+              <div className="min-w-0 flex-1">
                 <p className="text-xs text-muted-foreground">Phone</p>
-                <p className="text-sm font-medium">{customer.phone || "—"}</p>
+                {editing ? (
+                  <Input value={editForm.phone} onChange={(e) => setEditForm({...editForm, phone: e.target.value})} className="h-8 text-sm" />
+                ) : (
+                  <p className="text-sm font-medium">{customer.phone || "—"}</p>
+                )}
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              <MapPin className="h-5 w-5 text-muted-foreground" />
-              <div>
+            <div className="flex items-center gap-3 sm:col-span-2">
+              <MapPin className="h-5 w-5 text-muted-foreground shrink-0" />
+              <div className="min-w-0 flex-1">
                 <p className="text-xs text-muted-foreground">Address</p>
-                <p className="text-sm font-medium">
-                  {[customer.address, customer.city, customer.state].filter(Boolean).join(", ") || "—"}
-                </p>
+                {editing ? (
+                  <div className="space-y-1">
+                    <Input value={editForm.address} onChange={(e) => setEditForm({...editForm, address: e.target.value})} placeholder="Street address" className="h-8 text-sm" />
+                    <div className="flex gap-1">
+                      <Input value={editForm.city} onChange={(e) => setEditForm({...editForm, city: e.target.value})} placeholder="City" className="h-8 text-sm flex-1" />
+                      <Input value={editForm.state} onChange={(e) => setEditForm({...editForm, state: e.target.value})} placeholder="State" className="h-8 text-sm w-16" />
+                      <Input value={editForm.zipCode} onChange={(e) => setEditForm({...editForm, zipCode: e.target.value})} placeholder="Zip" className="h-8 text-sm w-20" />
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm font-medium truncate">
+                    {[customer.address, customer.city, customer.state].filter(Boolean).join(", ") || "—"}
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <Calendar className="h-5 w-5 text-muted-foreground" />
+              <Calendar className="h-5 w-5 text-muted-foreground shrink-0" />
               <div>
                 <p className="text-xs text-muted-foreground">Member Since</p>
                 <p className="text-sm font-medium">{formatDate(customer.memberSince)}</p>
@@ -203,7 +283,16 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
                   <CardTitle>Notes</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-sm text-muted-foreground">{customer.notes || "No notes yet"}</p>
+                  {editing ? (
+                    <textarea
+                      value={editForm.notes}
+                      onChange={(e) => setEditForm({...editForm, notes: e.target.value})}
+                      className="w-full h-24 rounded-lg border border-border bg-background p-3 text-sm resize-none"
+                      placeholder="Add notes about this customer..."
+                    />
+                  ) : (
+                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">{customer.notes || "No notes yet"}</p>
+                  )}
                 </CardContent>
               </Card>
             </div>
