@@ -55,10 +55,6 @@ export function BoatManager({ boats, onAddBoat, onDeleteBoat, onAddInsurance }: 
         <div className="flex flex-col items-center justify-center py-12 text-center">
           <Ship className="h-12 w-12 text-muted-foreground/30 mb-3" />
           <p className="text-sm text-muted-foreground">No boats registered yet</p>
-          <Button variant="outline" size="sm" className="mt-3" onClick={() => setShowAddBoat(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Register a Boat
-          </Button>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { AppShell } from "@/components/layout/app-shell";
 import { GlassCard, StatsCard } from "@/components/ui/glass-card";
 import { Badge } from "@/components/ui/badge";
@@ -124,6 +124,54 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
       setSaving(false);
     }
   };
+
+  const handleAddBoat = useCallback(async (boat: { name: string; make: string; model: string; year: number; length: number }) => {
+    try {
+      const res = await fetch("/api/boats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...boat, customerId: params.id }),
+      });
+      if (!res.ok) throw new Error("Failed to add boat");
+      const json = await res.json();
+      setCustomer((prev) => prev ? { ...prev, boats: [...prev.boats, json.data || json] } : prev);
+      toast.success("Boat added");
+    } catch (err) {
+      toast.error("Failed to add boat");
+    }
+  }, [params.id]);
+
+  const handleDeleteBoat = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/boats?id=${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete boat");
+      setCustomer((prev) => prev ? { ...prev, boats: prev.boats.filter((b: any) => b.id !== id) } : prev);
+      toast.success("Boat removed");
+    } catch (err) {
+      toast.error("Failed to delete boat");
+    }
+  }, []);
+
+  const handleAddInsurance = useCallback(async (boatId: string, insurance: { provider: string; policyNumber: string; expirationDate: string }) => {
+    try {
+      const res = await fetch("/api/insurance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...insurance, boatId }),
+      });
+      if (!res.ok) throw new Error("Failed to add insurance");
+      const json = await res.json();
+      setCustomer((prev) => prev ? {
+        ...prev,
+        boats: prev.boats.map((b: any) =>
+          b.id === boatId ? { ...b, insurance: json.data || json } : b
+        ),
+      } : prev);
+      toast.success("Insurance added");
+    } catch (err) {
+      toast.error("Failed to add insurance");
+    }
+  }, []);
 
   return (
     <AppShell>
@@ -301,9 +349,9 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
           <TabsContent value="boats" className="mt-6">
             <BoatManager
               boats={customer.boats}
-              onAddBoat={() => {}}
-              onDeleteBoat={() => {}}
-              onAddInsurance={() => {}}
+              onAddBoat={handleAddBoat}
+              onDeleteBoat={handleDeleteBoat}
+              onAddInsurance={handleAddInsurance}
             />
           </TabsContent>
 
