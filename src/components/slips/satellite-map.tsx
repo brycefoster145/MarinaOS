@@ -229,13 +229,10 @@ export function SatelliteDockDetection() {
     (lng: number, lat: number): { x: number; y: number } | null => {
       const map = mapRef.current;
       if (!map) return null;
-      const container = mapContainerRef.current;
-      if (!container) return null;
 
       try {
         const point = map.project([lng, lat]);
-        const rect = container.getBoundingClientRect();
-        return { x: point.x - rect.left, y: point.y - rect.top };
+        return { x: point.x, y: point.y };
       } catch {
         return null;
       }
@@ -247,12 +244,10 @@ export function SatelliteDockDetection() {
   const pixelToLngLat = useCallback(
     (px: number, py: number): { lng: number; lat: number } | null => {
       const map = mapRef.current;
-      const container = mapContainerRef.current;
-      if (!map || !container) return null;
+      if (!map) return null;
 
       try {
-        const rect = container.getBoundingClientRect();
-        const lngLat = map.unproject([px + rect.left, py + rect.top]);
+        const lngLat = map.unproject([px, py]);
         return { lng: lngLat.lng, lat: lngLat.lat };
       } catch {
         return null;
@@ -491,8 +486,6 @@ export function SatelliteDockDetection() {
     const map = mapRef.current;
     const container = mapContainerRef.current;
     if (!map || !container) return null;
-
-    const rect = container.getBoundingClientRect();
 
     return docks.map((dock) => {
       const isSelected = selectedDockId === dock.id;
