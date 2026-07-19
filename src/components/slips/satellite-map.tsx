@@ -577,17 +577,13 @@ export function SatelliteDockDetection() {
       const detected = detectDocksFromCanvas(canvas);
       const rect = container.getBoundingClientRect();
 
-      // Deduplicate: merge regions that overlap in position
+      // Deduplicate: merge regions that are close together
       const deduped: typeof detected = [];
       for (const d of detected) {
         let isDuplicate = false;
         for (const existing of deduped) {
-          // Check if centers are close (within 1 dock-width of each other)
-          const dx = Math.abs(d.x - existing.x);
-          const dy = Math.abs(d.y - existing.y);
-          const avgW = (d.w + existing.w) / 2;
-          // If centers are within half a dock-width, it's the same dock
-          if (dx < avgW * 0.6 && dy < avgW * 0.3) {
+          const dist = Math.sqrt((d.x - existing.x) ** 2 + (d.y - existing.y) ** 2);
+          if (dist < Math.min(d.w, existing.w) * 0.5) {
             isDuplicate = true;
             break;
           }
