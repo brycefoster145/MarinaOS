@@ -1050,10 +1050,59 @@ export function SatelliteDockDetection() {
               {mapLoaded && !mapError && (
                 <svg
                   ref={overlayRef}
-                  className="absolute inset-0 w-full h-full pointer-events-none z-10"
-                  style={{ pointerEvents: drawMode ? "none" : "none" }}
+                  className="absolute inset-0 w-full h-full z-10"
+                  style={{ pointerEvents: (drawMode || traceMode) ? "auto" : "none" }}
+                  onMouseDown={(e) => {
+                    if (!mapRef.current) return;
+                    const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
+                    const px = e.clientX - rect.left;
+                    const py = e.clientY - rect.top;
+                    const lngLat = mapRef.current.unproject([px, py]);
+                    e.preventDefault();
+                    const pt = { lng: lngLat.lng, lat: lngLat.lat };
+
+                    if (traceMode) {
+                      const pts = [...tracePointsRef.current, pt];
+                      if (pts.length >= 2) {
+                        finishTrace(pts[0], pts[1]);
+                        tracePointsRef.current = [];
+                        setTracePoints([]);
+                      } else {
+                        tracePointsRef.current = pts;
+                        setTracePoints(pts);
+                      }
+                      return;
+                    }
+
+                    if (!drawMode) return;
+                    drawStartRef.current = pt;
+                    drawCurrentRef.current = pt;
+                    setDrawStart(pt);
+                    setDrawCurrent(pt);
+                  }}
+                  onMouseMove={(e) => {
+                    if (!drawMode || !drawStartRef.current || !mapRef.current) return;
+                    const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
+                    const px = e.clientX - rect.left;
+                    const py = e.clientY - rect.top;
+                    const lngLat = mapRef.current.unproject([px, py]);
+                    const pt = { lng: lngLat.lng, lat: lngLat.lat };
+                    drawCurrentRef.current = pt;
+                    setDrawCurrent(pt);
+                  }}
+                  onMouseUp={(e) => {
+                    if (!drawMode || !drawStartRef.current || !drawCurrentRef.current) {
+                      drawStartRef.current = null;
+                      drawCurrentRef.current = null;
+                      setDrawStart(null);
+                      setDrawCurrent(null);
+                      return;
+                    }
+                    e.preventDefault();
+                    finishDraw();
+                  }}
                 >
-                  <g className="pointer-events-auto">
+                  <g className={drawMode ? "pointer-events-none" : "pointer-events-auto"}>
                     {renderDockOverlay()}
                     {renderDrawPreview()}
                   </g>
