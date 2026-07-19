@@ -588,38 +588,40 @@ export function SatelliteDockDetection() {
       }
 
       if (unique.length >= 2) {
-        const newDocks: DetectedDock[] = unique.map((d, idx) => {
-          // Convert canvas pixel coords to CSS pixel coords for map.unproject
+        // Filter out small private docks (< 15m / ~50ft)
+        const marinaDocks = unique.filter((d) => {
           const dpr = window.devicePixelRatio || 1;
-          const cssPx = d.x / dpr;
-          const cssPy = d.y / dpr;
-          const lngLat = map.unproject([cssPx, cssPy]);
-
-          const dockWidthM = (d.w / dpr) * 0.1; // Rough meter estimate
-          const slipCount = Math.max(2, Math.round(d.w / (dpr * 18)));
-
-          return {
-            id: genDockId(),
-            name: `Dock ${String.fromCharCode(65 + idx)}`,
-            lng: lngLat.lng,
-            lat: lngLat.lat,
-            width: dockWidthM,
-            height: 8,
-            color: DOCK_COLORS[idx % DOCK_COLORS.length],
-            slipCount,
-            slipLength: 40,
-            slipWidth: 14,
-            dailyRate: 3.5 + idx * 0.5,
-            monthlyRate: 75 + idx * 10,
-            confidence: 0.9,
-            slipStatuses: generateSlipStatuses(slipCount),
-          };
+          const dockWidthM = (d.w / dpr) * 0.1;
+          return dockWidthM >= 15;
         });
 
-        setDocks(newDocks);
-        toast.success(`Detected ${newDocks.length} docks from satellite imagery`);
-        setIsDetecting(false);
-        return;
+        if (marinaDocks.length >= 2) {
+          const newDocks: DetectedDock[] = marinaDocks.map((d, idx) => {
+            const dpr = window.devicePixelRatio || 1;
+            const cssPx = d.x / dpr;
+            const cssPy = d.y / dpr;
+            const lngLat = map.unproject([cssPx, cssPy]);
+            const dockWidthM = (d.w / dpr) * 0.1;
+            const slipCount = Math.max(2, Math.round(d.w / (dpr * 18)));
+            return {
+              id: genDockId(),
+              name: `Dock ${String.fromCharCode(65 + idx)}`,
+              lng: lngLat.lng, lat: lngLat.lat,
+              width: dockWidthM, height: 8,
+              color: DOCK_COLORS[idx % DOCK_COLORS.length],
+              slipCount, slipLength: 40, slipWidth: 14,
+              dailyRate: 3.5 + idx * 0.5, monthlyRate: 75 + idx * 10,
+              confidence: 0.9, slipStatuses: generateSlipStatuses(slipCount),
+            };
+          });
+
+          setDocks(newDocks);
+          toast.success(`Detected ${newDocks.length} docks`);
+          setIsDetecting(false);
+          return;
+        }
+
+        // If no marina-sized docks found, fall through to generated layout
       }
 
       // Step 3: Generate a marina layout based on the viewport (always works)
