@@ -280,6 +280,181 @@ export function SatelliteDockDetection() {
     }
   };
 
+  // Canvas-based dock detection (no AI API needed)
+  const detectDocksFromCanvas = (canvas: HTMLCanvasElement): { x: number; y: number; w: number; h: number }[] => {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return [];
+
+    const w = canvas.width;
+    const h = canvas.height;
+    const imageData = ctx.getImageData(0, 0, w, h);
+    const data = imageData.data;
+
+    // Convert to grayscale and find bright pixels (dock surfaces)
+    const gray = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      const idx = i * 4;
+      // Luminosity formula
+      gray[i] = Math.round(data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114);
+    }
+
+    // Calculate average brightness to determine adaptive threshold
+    let sum = 0;
+    for (let i = 0; i < gray.length; i++) sum += gray[i];
+    const avg = sum / gray.length;
+    // Docks are bright structures - threshold at avg + 20 (or 140, whichever is higher)
+    const threshold = Math.max(avg + 25, 140);
+
+    // Binary image: 1 = bright (potential dock), 0 = dark (water)
+    const binary = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      binary[i] = gray[i] > threshold ? 1 : 0;
+    }
+
+    // Find horizontal bright line segments (docks are horizontal structures)
+    // Scan each row for runs of bright pixels
+    const minDockLength = Math.round(w * 0.06); // At least 6% of image width
+    const maxGap = Math.round(w * 0.01); // Max gap between bright segments to merge
+
+    // Collect horizontal segments
+    const segments: { row: number; colStart: number; colEnd: number }[] = [];
+
+    for (let row = 0; row < h; row++) {
+      let col = 0;
+      while (col < w) {
+        // Skip dark pixels
+        while (col < w && binary[row * w + col] === 0) col++;
+        if (col >= w) break;
+
+        // Found start of bright run
+        const start = col;
+        while (col < w && binary[row * w + col] === 1) col++;
+        const end = col - 1;
+        const length = end - start + 1;
+
+        if (length >= minDockLength) {
+          segments.push({ row, colStart: start, colEnd: end });
+        }
+      }
+    }
+
+    // Group segments into dock rectangles
+    // Two segments are in the same dock if they overlap horizontally and are close vertically
+    const dockRegions: { x: number; y: number; w: number; h: number }[] = [];
+    const used = new Set<number>();
+
+    for (let i = 0; i < segments.length; i++) {
+      if (used.has(i)) continue;
+
+      let minRow = segments[i].row;
+      let maxRow = segments[i].row;
+      let minCol = segments[i].colStart;
+      let maxCol = segments[i].colEnd;
+      used.add(i);
+
+      // Look for adjacent rows that overlap
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (let j = 0; j < segments.length; j++) {
+          if (used.has(j)) continue;
+          const s = segments[j];
+          // Check if close vertically (within 8 rows) and overlapping horizontally
+          if (s.row >= minRow - 8 && s.row <= maxRow + 8) {
+            const overlap = Math.min(maxCol, s.colEnd) - Math.max(minCol, s.colStart);
+            if (overlap > 0) {
+              minRow = Math.min(minRow, s.row);
+              maxRow = Math.max(maxRow, s.row);
+              minCol = Math.min(minCol, s.colStart);
+              maxCol = Math.max(maxCol, s.colEnd);
+              used.add(j);
+              changed = true;
+            }
+          }
+        }
+      }
+
+      const dockW = maxCol - minCol + 1;
+      const dockH = maxRow - minRow + 1;
+      // Filter out very small or very square regions (docks are long and thin)
+      if (dockW > minDockLength && dockH < dockW * 0.3 && dockH > 3) {
+        dockRegions.push({
+          x: minCol + (maxCol - minCol) / 2,
+          y: minRow + (maxRow - minRow) / 2,
+          w: dockW,
+          h: dockH,
+        });
+      }
+    }
+
+    // Also scan for vertical docks (perpendicular to main docks)
+    // Find vertical bright line segments
+    const verticalSegments: { col: number; rowStart: number; rowEnd: number }[] = [];
+    for (let col = 0; col < w; col++) {
+      let row = 0;
+      while (row < h) {
+        while (row < h && binary[row * w + col] === 0) row++;
+        if (row >= h) break;
+        const start = row;
+        while (row < h && binary[row * w + col] === 1) row++;
+        const end = row - 1;
+        const length = end - start + 1;
+        // Vertical docks: shorter segments, at least 20px
+        if (length >= 20) {
+          verticalSegments.push({ col, rowStart: start, rowEnd: end });
+        }
+      }
+    }
+
+    // Group vertical segments
+    const vUsed = new Set<number>();
+    for (let i = 0; i < verticalSegments.length; i++) {
+      if (vUsed.has(i)) continue;
+
+      let minCol = verticalSegments[i].col;
+      let maxCol = verticalSegments[i].col;
+      let minRow = verticalSegments[i].rowStart;
+      let maxRow = verticalSegments[i].rowEnd;
+      vUsed.add(i);
+
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (let j = 0; j < verticalSegments.length; j++) {
+          if (vUsed.has(j)) continue;
+          const s = verticalSegments[j];
+          if (s.col >= minCol - 8 && s.col <= maxCol + 8) {
+            const overlap = Math.min(maxRow, s.rowEnd) - Math.max(minRow, s.rowStart);
+            if (overlap > 0) {
+              minCol = Math.min(minCol, s.col);
+              maxCol = Math.max(maxCol, s.col);
+              minRow = Math.min(minRow, s.rowStart);
+              maxRow = Math.max(maxRow, s.rowEnd);
+              vUsed.add(j);
+              changed = true;
+            }
+          }
+        }
+      }
+
+      const dockW = maxCol - minCol + 1;
+      const dockH = maxRow - minRow + 1;
+      if (dockH > 40 && dockW < dockH * 0.3) {
+        dockRegions.push({
+          x: minCol + (maxCol - minCol) / 2,
+          y: minRow + (maxRow - minRow) / 2,
+          w: dockW,
+          h: dockH,
+        });
+      }
+    }
+
+    // Sort by y position (top to bottom)
+    dockRegions.sort((a, b) => a.y - b.y);
+
+    return dockRegions;
+  };
+
   // AI Detection
   const runAIDetection = async () => {
     setIsDetecting(true);
@@ -292,11 +467,47 @@ export function SatelliteDockDetection() {
       const canvas = map.getCanvas();
       const rect = container.getBoundingClientRect();
 
-      // Get the full-resolution canvas dimensions
+      // Step 1: Try client-side computer vision detection first
+      const detected = detectDocksFromCanvas(canvas);
+
+      if (detected.length >= 2) {
+        const newDocks: DetectedDock[] = detected.map((d, idx) => {
+          // Convert canvas pixel coords to CSS pixel coords for map.unproject
+          const dpr = window.devicePixelRatio || 1;
+          const cssPx = d.x / dpr;
+          const cssPy = d.y / dpr;
+          const lngLat = map.unproject([cssPx, cssPy]);
+
+          const dockWidthM = (d.w / dpr) * 0.1; // Rough meter estimate
+          const slipCount = Math.max(2, Math.round(d.w / (dpr * 18)));
+
+          return {
+            id: genDockId(),
+            name: `Dock ${String.fromCharCode(65 + idx)}`,
+            lng: lngLat.lng,
+            lat: lngLat.lat,
+            width: dockWidthM,
+            height: 8,
+            color: DOCK_COLORS[idx % DOCK_COLORS.length],
+            slipCount,
+            slipLength: 40,
+            slipWidth: 14,
+            dailyRate: 3.5 + idx * 0.5,
+            monthlyRate: 75 + idx * 10,
+            confidence: 0.9,
+          };
+        });
+
+        setDocks(newDocks);
+        toast.success(`Detected ${newDocks.length} docks from satellite imagery`);
+        setIsDetecting(false);
+        return;
+      }
+
+      // Step 2: Fall back to AI API if computer vision didn't find enough
       const origWidth = canvas.width;
       const origHeight = canvas.height;
 
-      // Resize image to max 800px wide to keep API call fast
       let imageUrl = canvas.toDataURL("image/jpeg", 0.7);
       const img = new window.Image();
       await new Promise<void>((resolve, reject) => {
@@ -305,7 +516,6 @@ export function SatelliteDockDetection() {
         img.src = imageUrl;
       });
 
-      // Track resize ratio so we can map pixel coords back to canvas space
       let resizeRatio = 1;
       let finalWidth = img.width;
       let finalHeight = img.height;
@@ -341,29 +551,24 @@ export function SatelliteDockDetection() {
 
       const json = await res.json();
       if (json.data?.suggestions && json.data.suggestions.length > 0) {
+        const dpr = window.devicePixelRatio || 1;
         const newDocks = json.data.suggestions.map((s: MapSuggestion) => {
           // Convert pixel coordinates back to full-canvas space
           const canvasPx = s.px / resizeRatio;
           const canvasPy = s.py / resizeRatio;
+          // Convert to CSS pixel space for map.unproject
+          const cssPx = canvasPx / dpr;
+          const cssPy = canvasPy / dpr;
 
           // Convert pixel coords to lat/lng using Mapbox unproject
-          const lngLat = map.unproject([canvasPx, canvasPy]);
-
-          // Estimate meters per pixel at this zoom and latitude
-          const bounds = map.getBounds();
-          const sw = bounds.getSouthWest();
-          const ne = bounds.getNorthEast();
-          const metersPerDegLng = 111320 * Math.cos((lngLat.lat * Math.PI) / 180);
-          const metersPerDegLat = 111320;
-          const pixelToMetersLng = (ne.lng - sw.lng) / origWidth * metersPerDegLng;
-          const pixelToMetersLat = (ne.lat - sw.lat) / origHeight * metersPerDegLat;
+          const lngLat = map.unproject([cssPx, cssPy]);
 
           return {
             id: genDockId(),
             name: s.name,
             lng: lngLat.lng,
             lat: lngLat.lat,
-            width: s.width || (s.px ? s.width / resizeRatio * pixelToMetersLng : 80),
+            width: s.width || 80,
             height: s.height || 8,
             color: s.color || DOCK_COLORS[0],
             slipCount: s.slipCount || 4,
