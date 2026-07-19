@@ -68,6 +68,8 @@ export function SatelliteDockDetection() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [searchQuery, setSearchQuery] = useState("Newport Beach, CA");
   const [lngLat, setLngLat] = useState<[number, number]>([-117.92, 33.62]);
+  const [traceMode, setTraceMode] = useState(false);
+  const [tracePoints, setTracePoints] = useState<{ lng: number; lat: number }[]>([]);
   const [drawMode, setDrawMode] = useState(false);
   const [drawStart, setDrawStart] = useState<{ lng: number; lat: number } | null>(null);
   const [drawCurrent, setDrawCurrent] = useState<{ lng: number; lat: number } | null>(null);
@@ -75,11 +77,15 @@ export function SatelliteDockDetection() {
   const drawModeRef = useRef(false);
   const drawStartRef = useRef<{ lng: number; lat: number } | null>(null);
   const drawCurrentRef = useRef<{ lng: number; lat: number } | null>(null);
+  const traceModeRef = useRef(false);
+  const tracePointsRef = useRef<{ lng: number; lat: number }[]>([]);
 
   // Keep refs in sync
   useEffect(() => { drawModeRef.current = drawMode; }, [drawMode]);
   useEffect(() => { drawStartRef.current = drawStart; }, [drawStart]);
   useEffect(() => { drawCurrentRef.current = drawCurrent; }, [drawCurrent]);
+  useEffect(() => { traceModeRef.current = traceMode; }, [traceMode]);
+  useEffect(() => { tracePointsRef.current = tracePoints; }, [tracePoints]);
 
   // Load Mapbox GL JS from CDN
   useEffect(() => {
@@ -151,6 +157,23 @@ export function SatelliteDockDetection() {
 
             // Drawing handlers using Mapbox events
                   map.on("mousedown", (e: any) => {
+                    if (traceModeRef.current) {
+                      e.originalEvent.preventDefault();
+                      map.dragPan.disable();
+                      const pt = { lng: e.lngLat.lng, lat: e.lngLat.lat };
+                      const pts = [...tracePointsRef.current, pt];
+                      if (pts.length >= 2) {
+                        // Second click — create the dock
+                        finishTrace(pts[0], pts[1]);
+                        tracePointsRef.current = [];
+                        setTracePoints([]);
+                        map.dragPan.enable();
+                      } else {
+                        tracePointsRef.current = pts;
+                        setTracePoints(pts);
+                      }
+                      return;
+                    }
                     if (!drawModeRef.current) return;
                     e.originalEvent.preventDefault();
                     map.dragPan.disable();
@@ -387,6 +410,43 @@ export function SatelliteDockDetection() {
     setDrawCurrent(null);
   };
 
+  const finishTrace = (start: { lng: number; lat: number }, end: { lng: number; lat: number }) => {
+    const centerLat = (start.lat + end.lat) / 2;
+    const centerLng = (start.lng + end.lng) / 2;
+    const latDiff = Math.abs(end.lat - start.lat);
+    const lngDiff = Math.abs(end.lng - start.lng);
+    const dockLengthM = Math.max(latDiff * 111320, lngDiff * 111320 * Math.cos((centerLat * Math.PI) / 180));
+    const dockWidthM = 4; // Standard dock width ~4m
+
+    // Slips are ~4.5m wide, placed on both sides
+    const slipWidth = 4.5;
+    const slipsPerSide = Math.max(1, Math.floor(dockLengthM / slipWidth / 2));
+    const totalSlips = slipsPerSide * 2;
+
+    // Determine dock orientation — if more horizontal, width is lng; else width is lat
+    const isHorizontal = lngDiff > latDiff;
+
+    const idx = docks.length;
+    const newDock: DetectedDock = {
+      id: genDockId(),
+      name: `Dock ${String.fromCharCode(65 + idx)}`,
+      lng: centerLng,
+      lat: centerLat,
+      width: isHorizontal ? dockLengthM : dockWidthM,
+      height: isHorizontal ? dockWidthM : dockLengthM,
+      color: DOCK_COLORS[idx % DOCK_COLORS.length],
+      slipCount: totalSlips,
+      slipLength: 40,
+      slipWidth: 14,
+      dailyRate: 3.5 + idx * 0.3,
+      monthlyRate: 75 + idx * 5,
+    };
+
+    setDocks((prev) => [...prev, newDock]);
+    setSelectedDockId(newDock.id);
+    setTraceMode(false);
+  };
+
   // Save to DB
   const handleSave = async () => {
     if (docks.length === 0) return;
@@ -539,10 +599,26 @@ export function SatelliteDockDetection() {
           <Button
             variant={drawMode ? "default" : "outline"}
             size="sm"
-            onClick={() => setDrawMode(!drawMode)}
+            onClick={() => {
+              if (traceMode) setTraceMode(false);
+              setDrawMode(!drawMode);
+            }}
           >
             <Pencil className="h-4 w-4 mr-1.5" />
             {drawMode ? "Drawing..." : "Draw Dock"}
+          </Button>
+          <Button
+            variant={traceMode ? "default" : "outline"}
+            size="sm"
+            onClick={() => {
+              if (drawMode) setDrawMode(false);
+              setTraceMode(!traceMode);
+              setTracePoints([]);
+              tracePointsRef.current = [];
+            }}
+          >
+            <Crosshair className="h-4 w-4 mr-1.5" />
+            {traceMode ? "Click to place..." : "Quick Trace"}
           </Button>
           <Button
             variant="outline"
