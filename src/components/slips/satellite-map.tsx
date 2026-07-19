@@ -578,7 +578,7 @@ export function SatelliteDockDetection() {
       const rect = container.getBoundingClientRect();
 
       // Deduplicate: merge nearby bright strips into one dock
-      const mergeThreshold = 80; // pixels - merge strips within this distance
+      const mergeThreshold = Math.max(100, canvas.width * 0.12); // 12% of canvas width
       const unique: typeof detected = [];
       for (const d of detected) {
         let merged = false;
