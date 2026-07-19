@@ -99,7 +99,7 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
               <h1 className="text-2xl sm:text-3xl font-display font-bold">
                 {customer.firstName} {customer.lastName}
               </h1>
-              <Badge variant={customer.isActive ? "success" : "secondary"} className="text-xs">
+              <Badge variant={customer.isActive ? "success" : "default"} className="text-xs">
                 {customer.isActive ? "Active" : "Inactive"}
               </Badge>
             </div>
