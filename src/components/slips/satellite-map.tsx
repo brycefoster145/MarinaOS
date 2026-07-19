@@ -496,8 +496,10 @@ export function SatelliteDockDetection() {
       const metersPerDegLat = 111320;
 
       // Dock dimensions in pixels
-      const halfWPx = (dock.width / 2 / metersPerDegLng) * (lngLatToPixel(dock.lng + 1 / metersPerDegLng, dock.lat)?.x - center.x || 1);
-      const halfHPx = (dock.height / 2 / metersPerDegLat) * (lngLatToPixel(dock.lng, dock.lat + 1 / metersPerDegLat)?.y - center.y || 1);
+      const pxDeltaLng = lngLatToPixel(dock.lng + 1 / metersPerDegLng, dock.lat);
+      const pxDeltaLat = lngLatToPixel(dock.lng, dock.lat + 1 / metersPerDegLat);
+      const halfWPx = (dock.width / 2 / metersPerDegLng) * ((pxDeltaLng ? pxDeltaLng.x : 0) - center.x || 1);
+      const halfHPx = (dock.height / 2 / metersPerDegLat) * ((pxDeltaLat ? pxDeltaLat.y : 0) - center.y || 1);
 
       // Determine orientation: longer side is the walkway direction
       const isHorizontal = dock.width > dock.height;
