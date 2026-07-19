@@ -677,16 +677,19 @@ export function SatelliteDockDetection() {
     const centerLng = (start.lng + end.lng) / 2;
     const latDiff = Math.abs(end.lat - start.lat);
     const lngDiff = Math.abs(end.lng - start.lng);
-    const dockLengthM = Math.max(latDiff * 111320, lngDiff * 111320 * Math.cos((centerLat * Math.PI) / 180));
-    const dockWidthM = 4; // Standard dock width ~4m
 
-    // Slips are ~4.5m wide, placed on both sides
-    const slipWidth = 4.5;
-    const slipsPerSide = Math.max(1, Math.floor(dockLengthM / slipWidth / 2));
-    const totalSlips = slipsPerSide * 2;
-
-    // Determine dock orientation — if more horizontal, width is lng; else width is lat
+    // Auto-correct to straight: snap to nearest axis
     const isHorizontal = lngDiff > latDiff;
+    const walkwayLengthM = isHorizontal
+      ? lngDiff * 111320 * Math.cos((centerLat * Math.PI) / 180)
+      : latDiff * 111320;
+    const walkwayWidthM = 5; // Walkway is ~5m wide
+
+    // Finger piers: ~4.5m (15ft) wide, ~40ft long, spaced every 5m along walkway
+    const fingerWidth = 4.5;
+    const fingerLength = 40;
+    const fingerSpacing = 5;
+    const fingerCount = Math.max(2, Math.floor(walkwayLengthM / fingerSpacing));
 
     const idx = docks.length;
     const newDock: DetectedDock = {
@@ -694,20 +697,21 @@ export function SatelliteDockDetection() {
       name: `Dock ${String.fromCharCode(65 + idx)}`,
       lng: centerLng,
       lat: centerLat,
-      width: isHorizontal ? dockLengthM : dockWidthM,
-      height: isHorizontal ? dockWidthM : dockLengthM,
+      width: isHorizontal ? walkwayLengthM : walkwayWidthM,
+      height: isHorizontal ? walkwayWidthM : walkwayLengthM,
       color: DOCK_COLORS[idx % DOCK_COLORS.length],
-      slipCount: totalSlips,
-      slipLength: 40,
-      slipWidth: 14,
+      slipCount: fingerCount,
+      slipLength: fingerLength,
+      slipWidth: fingerWidth,
       dailyRate: 3.5 + idx * 0.3,
       monthlyRate: 75 + idx * 5,
-      slipStatuses: generateSlipStatuses(totalSlips),
+      slipStatuses: generateSlipStatuses(fingerCount),
     };
 
     setDocks((prev) => [...prev, newDock]);
     setSelectedDockId(newDock.id);
     setTraceMode(false);
+    toast.success(`Created ${newDock.name} with ${fingerCount} finger piers`);
   };
 
   // Save to DB
@@ -824,14 +828,14 @@ export function SatelliteDockDetection() {
                 y={isHorizontal ? sy + sh / 2 + 3 : sy + sh / 2 + 3}
                 textAnchor="middle"
                 fill="white"
-                fontSize={7}
+                fontSize={6}
                 fontWeight={500}
                 fontFamily="monospace"
                 opacity={0.9}
                 className="pointer-events-none"
                 style={{ textShadow: "0 1px 2px rgba(0,0,0,0.7)" }}
               >
-                {dock.slipLength}'
+                {dock.slipLength}'×{dock.slipWidth}'
               </text>
             )}
           </g>
@@ -959,7 +963,7 @@ export function SatelliteDockDetection() {
             }}
           >
             <Crosshair className="h-4 w-4 mr-1.5" />
-            {traceMode ? "Click to place..." : "Quick Trace"}
+            {traceMode ? "Click to place..." : "Draw Walkway"}
           </Button>
           <Button
             variant="outline"
