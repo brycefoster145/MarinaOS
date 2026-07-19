@@ -401,167 +401,72 @@ export function SatelliteDockDetection() {
     return docks;
   };
 
-  // Canvas-based dock detection (no AI API needed)
-  // Detect dock shapes (long bright rectangles) from canvas
+  // Canvas-based dock detection - scan columns for bright dock strips on dark water
   const detectDocksFromCanvas = (canvas: HTMLCanvasElement): { x: number; y: number; w: number; h: number }[] => {
     const ctx = canvas.getContext("2d");
     if (!ctx) return [];
 
     const w = canvas.width;
     const h = canvas.height;
-    // Use a smaller working image for speed
-    const scale = Math.min(1, 400 / Math.max(w, h));
-    const sw = Math.round(w * scale);
-    const sh = Math.round(h * scale);
+    // Work at a small resolution for speed
+    const workW = 200;
+    const workH = Math.round(h * (workW / w));
     const tmpCanvas = document.createElement("canvas");
-    tmpCanvas.width = sw;
-    tmpCanvas.height = sh;
+    tmpCanvas.width = workW;
+    tmpCanvas.height = workH;
     const tmpCtx = tmpCanvas.getContext("2d");
     if (!tmpCtx) return [];
-    tmpCtx.drawImage(canvas, 0, 0, sw, sh);
+    tmpCtx.drawImage(canvas, 0, 0, workW, workH);
 
-    const imageData = tmpCtx.getImageData(0, 0, sw, sh);
+    const imageData = tmpCtx.getImageData(0, 0, workW, workH);
     const data = imageData.data;
 
-    // Convert to grayscale
-    const gray = new Float32Array(sw * sh);
-    for (let i = 0; i < sw * sh; i++) {
-      const idx = i * 4;
-      gray[i] = data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
-    }
-
-    // Find the water brightness level (40th percentile = darkest 40% is water)
-    const sorted = [...gray].sort((a, b) => a - b);
-    const waterLevel = sorted[Math.floor(sorted.length * 0.4)];
-    const dockThreshold = waterLevel + 35;
-
-    // Scan each row for bright stripes (dark→bright→dark patterns)
-    // A dock at row y appears as a contiguous run of bright pixels
-    const minDockWidth = Math.round(sw * 0.04); // At least 4% of image width
-    const rowStripeCounts: number[] = new Array(sh).fill(0);
-
-    for (let y = 0; y < sh; y++) {
-      let stripes = 0;
-      let x = 0;
-      while (x < sw) {
-        // Find start of bright run
-        while (x < sw && gray[y * sw + x] <= dockThreshold) x++;
-        if (x >= sw) break;
-        const start = x;
-        while (x < sw && gray[y * sw + x] > dockThreshold) x++;
-        const end = x - 1;
-        const width = end - start + 1;
-        if (width >= minDockWidth) {
-          stripes++;
-        }
+    // Calculate average brightness per column
+    const colBrightness: number[] = new Array(workW).fill(0);
+    for (let x = 0; x < workW; x++) {
+      let sum = 0;
+      for (let y = 0; y < workH; y++) {
+        const idx = (y * workW + x) * 4;
+        sum += data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
       }
-      rowStripeCounts[y] = stripes;
+      colBrightness[x] = sum / workH;
     }
 
-    // Find rows with docks (2+ stripes = multiple docks crossing this row)
-    // Group consecutive dock rows into dock bands
-    interface DockBand {
-      yStart: number;
-      yEnd: number;
-      xStarts: number[];
-      xEnds: number[];
-    }
-    const bands: DockBand[] = [];
-    let inBand = false;
-    let currentBand: DockBand | null = null;
+    // Find water brightness (lowest 30% of columns)
+    const sorted = [...colBrightness].sort((a, b) => a - b);
+    const waterBrightness = sorted[Math.floor(sorted.length * 0.3)];
+    // Dock threshold: significantly brighter than water
+    const dockThreshold = waterBrightness + 25;
 
-    for (let y = 0; y < sh; y++) {
-      if (rowStripeCounts[y] >= 1) {
-        if (!inBand) {
-          currentBand = { yStart: y, yEnd: y, xStarts: [], xEnds: [] };
-          inBand = true;
-        }
-        if (currentBand) {
-          currentBand.yEnd = y;
-          // Scan this row for stripe positions
-          let x = 0;
-          while (x < sw) {
-            while (x < sw && gray[y * sw + x] <= dockThreshold) x++;
-            if (x >= sw) break;
-            const start = x;
-            while (x < sw && gray[y * sw + x] > dockThreshold) x++;
-            const end = x - 1;
-            if (end - start + 1 >= minDockWidth) {
-              currentBand.xStarts.push(start);
-              currentBand.xEnds.push(end);
-            }
-          }
-        }
-      } else {
-        if (inBand && currentBand) {
-          // Only keep the band if it's tall enough (at least 3 rows)
-          if (currentBand.yEnd - currentBand.yStart >= 3) {
-            bands.push(currentBand);
-          }
-          currentBand = null;
-        }
-        inBand = false;
+    // Tag each column: 1 = dock, 0 = water
+    const isDockCol: boolean[] = colBrightness.map((b) => b > dockThreshold);
+
+    // Group consecutive dock columns into docks
+    // Minimum dock width: 3 columns (at 200px work width, ~3% of image)
+    const minDockCols = 3;
+    const docks: { x: number; y: number; w: number; h: number }[] = [];
+    let col = 0;
+    while (col < workW) {
+      if (!isDockCol[col]) { col++; continue; }
+      const start = col;
+      while (col < workW && isDockCol[col]) col++;
+      const end = col - 1;
+      const dockWidth = end - start + 1;
+      if (dockWidth >= minDockCols) {
+        const centerX = (start + end) / 2;
+        const dockHeight = workH * 0.7; // docks extend 70% of image height
+        // Convert back to original canvas pixel space
+        const scale = workW / w;
+        docks.push({
+          x: centerX / scale,
+          y: (workH * 0.15) / scale, // start 15% from top
+          w: (dockWidth * 3) / scale, // estimated dock length
+          h: dockHeight / scale,
+        });
       }
     }
-    if (inBand && currentBand && currentBand.yEnd - currentBand.yStart >= 3) {
-      bands.push(currentBand);
-    }
 
-    // Convert bands to dock regions
-    const dockRegions: { x: number; y: number; w: number; h: number }[] = [];
-
-    bands.forEach((band) => {
-      // Find the most common x position of stripes (cluster them)
-      // Group stripes by x position
-      const stripeClusters: { x: number; count: number }[] = [];
-      for (let i = 0; i < band.xStarts.length; i++) {
-        const cx = (band.xStarts[i] + band.xEnds[i]) / 2;
-        // Find or create cluster
-        let found = false;
-        for (const c of stripeClusters) {
-          if (Math.abs(c.x - cx) < minDockWidth * 0.5) {
-            c.count++;
-            found = true;
-            break;
-          }
-        }
-        if (!found) {
-          stripeClusters.push({ x: cx, count: 1 });
-        }
-      }
-
-      // Sort clusters by count (most common = most likely dock)
-      stripeClusters.sort((a, b) => b.count - a.count);
-
-      // Take the top clusters
-      const topClusters = stripeClusters.slice(0, Math.min(8, stripeClusters.length));
-
-      topClusters.forEach((cluster) => {
-        const dockW = minDockWidth * 3; // Estimate dock width
-        const dockH = (band.yEnd - band.yStart + 1) / scale * 1.5;
-        const centerX = (cluster.x) / scale;
-        const centerY = (band.yStart + band.yEnd) / 2 / scale;
-
-        // Only add if it's a proper long rectangle (w > 2*h)
-        if (dockW > dockH) {
-          dockRegions.push({
-            x: centerX,
-            y: centerY,
-            w: dockW,
-            h: dockH,
-          });
-        }
-      });
-    });
-
-    // Convert back to original canvas pixel space
-    const invScale = 1 / scale;
-    return dockRegions.map((r) => ({
-      x: r.x * invScale,
-      y: r.y * invScale,
-      w: r.w * invScale,
-      h: r.h * invScale,
-    }));
+    return docks;
   };
 
   // AI Detection
@@ -582,7 +487,54 @@ export function SatelliteDockDetection() {
         return;
       }
 
-      // Step 2: Generate a marina layout based on the viewport (always works)
+      // Step 2: Try column-scan detection from the canvas image
+      toast.info("Analyzing satellite image for dock shapes...");
+      const canvas = map.getCanvas();
+      const detected = detectDocksFromCanvas(canvas);
+      const dpr = window.devicePixelRatio || 1;
+
+      // Deduplicate: only merge docks at the same x position
+      const deduped: typeof detected = [];
+      for (const d of detected) {
+        let isDuplicate = false;
+        for (const existing of deduped) {
+          if (Math.abs(d.x - existing.x) < 30) {
+            isDuplicate = true;
+            break;
+          }
+        }
+        if (!isDuplicate) deduped.push(d);
+      }
+
+      if (deduped.length >= 2) {
+        const newDocks: DetectedDock[] = deduped.map((d, idx) => {
+          const lngLat = map.unproject([d.x / dpr, d.y / dpr]);
+          const dockLengthM = Math.max(10, (d.w / dpr) * 0.15);
+          const slipCount = Math.max(2, Math.round(dockLengthM / 4.5));
+          return {
+            id: genDockId(),
+            name: `Dock ${String.fromCharCode(65 + idx)}`,
+            lng: lngLat.lng,
+            lat: lngLat.lat,
+            width: dockLengthM,
+            height: 8,
+            color: DOCK_COLORS[idx % DOCK_COLORS.length],
+            slipCount,
+            slipLength: 40,
+            slipWidth: 14,
+            dailyRate: 3.5 + idx * 0.5,
+            monthlyRate: 75 + idx * 10,
+            confidence: 0.85,
+            slipStatuses: generateSlipStatuses(slipCount),
+          };
+        });
+        setDocks(newDocks);
+        toast.success(`Detected ${newDocks.length} docks from satellite image`);
+        setIsDetecting(false);
+        return;
+      }
+
+      // Step 3: Generate a marina layout based on the viewport (always works)
       const generated = generateMarinaLayout();
       if (generated.length >= 2) {
         setDocks(generated);
