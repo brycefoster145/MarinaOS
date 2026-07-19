@@ -481,7 +481,7 @@ export function SatelliteDockDetection() {
     setSelectedDockId(null);
   };
 
-  // Render dock overlays
+  // Render dock overlays with individual slips
   const renderDockOverlay = () => {
     const map = mapRef.current;
     const container = mapContainerRef.current;
@@ -489,57 +489,93 @@ export function SatelliteDockDetection() {
 
     return docks.map((dock) => {
       const isSelected = selectedDockId === dock.id;
-      const topLeft = lngLatToPixel(dock.lng - dock.width / 2 / (111320 * Math.cos((dock.lat * Math.PI) / 180)), dock.lat + dock.height / 2 / 111320);
-      const bottomRight = lngLatToPixel(dock.lng + dock.width / 2 / (111320 * Math.cos((dock.lat * Math.PI) / 180)), dock.lat - dock.height / 2 / 111320);
+      const center = lngLatToPixel(dock.lng, dock.lat);
+      if (!center) return null;
 
-      if (!topLeft || !bottomRight) return null;
+      const metersPerDegLng = 111320 * Math.cos((dock.lat * Math.PI) / 180);
+      const metersPerDegLat = 111320;
 
-      const w = bottomRight.x - topLeft.x;
-      const h = bottomRight.y - topLeft.y;
+      // Dock dimensions in pixels
+      const halfWPx = (dock.width / 2 / metersPerDegLng) * (lngLatToPixel(dock.lng + 1 / metersPerDegLng, dock.lat)?.x - center.x || 1);
+      const halfHPx = (dock.height / 2 / metersPerDegLat) * (lngLatToPixel(dock.lng, dock.lat + 1 / metersPerDegLat)?.y - center.y || 1);
 
-      return (
-        <g key={dock.id}>
+      // Determine orientation: longer side is the walkway direction
+      const isHorizontal = dock.width > dock.height;
+      const walkwayLengthPx = isHorizontal ? halfWPx * 2 : halfHPx * 2;
+      const walkwayWidthPx = Math.min(isHorizontal ? halfHPx * 2 : halfWPx * 2, 12);
+
+      // Slip dimensions in pixels
+      const slipWidthPx = walkwayLengthPx / dock.slipCount * 0.8;
+      const slipLengthPx = Math.max(isHorizontal ? halfHPx * 2 - walkwayWidthPx : halfWPx * 2 - walkwayWidthPx, 8);
+
+      const slipsPerSide = Math.ceil(dock.slipCount / 2);
+      const slipSpacing = walkwayLengthPx / (slipsPerSide + 1);
+
+      const slips: JSX.Element[] = [];
+      for (let i = 0; i < dock.slipCount; i++) {
+        const side = i < slipsPerSide ? -1 : 1;
+        const idx = i < slipsPerSide ? i : i - slipsPerSide;
+        const offset = (idx + 1) * slipSpacing - walkwayLengthPx / 2;
+
+        let sx: number, sy: number, sw: number, sh: number;
+        if (isHorizontal) {
+          sx = center.x + offset - slipWidthPx / 2;
+          sy = side === -1 ? center.y - walkwayWidthPx / 2 - slipLengthPx : center.y + walkwayWidthPx / 2;
+          sw = slipWidthPx;
+          sh = slipLengthPx;
+        } else {
+          sx = side === -1 ? center.x - walkwayWidthPx / 2 - slipLengthPx : center.x + walkwayWidthPx / 2;
+          sy = center.y + offset - slipWidthPx / 2;
+          sw = slipLengthPx;
+          sh = slipWidthPx;
+        }
+
+        slips.push(
           <rect
-            x={topLeft.x}
-            y={topLeft.y}
-            width={w}
-            height={h}
-            rx={4}
+            key={`slip-${dock.id}-${i}`}
+            x={sx} y={sy} width={sw} height={sh} rx={2}
             fill={dock.color}
-            fillOpacity={isSelected ? 0.6 : 0.35}
-            stroke={isSelected ? "#ffffff" : dock.color}
-            strokeWidth={isSelected ? 3 : 2}
+            fillOpacity={isSelected ? 0.7 : 0.45}
+            stroke={dock.color} strokeWidth={1}
             className="cursor-pointer"
             onClick={() => setSelectedDockId(dock.id)}
           />
-          <text
-            x={topLeft.x + w / 2}
-            y={topLeft.y + h / 2 + 4}
-            textAnchor="middle"
-            fill="white"
-            fontSize={12}
-            fontWeight={700}
-            style={{ textShadow: "0 1px 3px rgba(0,0,0,0.8)" }}
-          >
-            {dock.name} ({dock.slipCount} slips)
-          </text>
-          {dock.confidence && (
-            <text
-              x={topLeft.x + w - 4}
-              y={topLeft.y - 4}
-              textAnchor="end"
-              fill="#a3e635"
-              fontSize={9}
-              style={{ textShadow: "0 1px 2px rgba(0,0,0,0.8)" }}
-            >
-              {(dock.confidence * 100).toFixed(0)}% match
-            </text>
-          )}
-        </g>
+        );
+      }
+
+      // Walkway
+      const walkway = (
+        <rect
+          x={isHorizontal ? center.x - halfWPx : center.x - walkwayWidthPx / 2}
+          y={isHorizontal ? center.y - walkwayWidthPx / 2 : center.y - halfHPx}
+          width={isHorizontal ? halfWPx * 2 : walkwayWidthPx}
+          height={isHorizontal ? walkwayWidthPx : halfHPx * 2}
+          rx={3}
+          fill={dock.color}
+          fillOpacity={isSelected ? 0.8 : 0.6}
+          stroke={isSelected ? "#ffffff" : dock.color}
+          strokeWidth={isSelected ? 2 : 1.5}
+          className="cursor-pointer"
+          onClick={() => setSelectedDockId(dock.id)}
+        />
       );
+
+      // Label
+      const label = (
+        <text
+          x={center.x} y={center.y + 4}
+          textAnchor="middle"
+          fill="white" fontSize={12} fontWeight={700}
+          style={{ textShadow: "0 1px 3px rgba(0,0,0,0.8)" }}
+          className="pointer-events-none"
+        >
+          {dock.name} ({dock.slipCount})
+        </text>
+      );
+
+      return <g key={dock.id}>{slips}{walkway}{label}</g>;
     });
   };
-
   // Render drawing preview
   const renderDrawPreview = () => {
     if (!drawStart || !drawCurrent || !mapRef.current) return null;
