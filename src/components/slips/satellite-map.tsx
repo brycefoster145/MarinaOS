@@ -563,9 +563,7 @@ export function SatelliteDockDetection() {
       const container = mapContainerRef.current;
       if (!map || !container) return;
 
-      const canvas = map.getCanvas();
-
-      // Step 1: Try OpenStreetMap data first (most accurate)
+      // Try OpenStreetMap data
       const osmDocks = await queryOSMForMarina(lngLat[1], lngLat[0]);
       if (osmDocks && osmDocks.length >= 2) {
         setDocks(osmDocks);
@@ -573,76 +571,14 @@ export function SatelliteDockDetection() {
         return;
       }
 
-      // Step 2: Try client-side computer vision detection
-      const detected = detectDocksFromCanvas(canvas);
-      const rect = container.getBoundingClientRect();
-
-      // Deduplicate: merge nearby bright strips into one dock
-      const mergeThreshold = Math.max(100, canvas.width * 0.12); // 12% of canvas width
-      const unique: typeof detected = [];
-      for (const d of detected) {
-        let merged = false;
-        for (const u of unique) {
-          if (Math.abs(d.x - u.x) < mergeThreshold) {
-            // Merge: average their positions, combine widths
-            u.x = (u.x + d.x) / 2;
-            u.w = Math.max(u.w, d.w);
-            merged = true;
-            break;
-          }
-        }
-        if (!merged) unique.push({ ...d });
-      }
-
-      if (unique.length >= 2) {
-        // Filter out small private docks (< 15m / ~50ft)
-        const marinaDocks = unique.filter((d) => {
-          const dpr = window.devicePixelRatio || 1;
-          const dockWidthM = (d.w / dpr) * 0.1;
-          return dockWidthM >= 15;
-        });
-
-        if (marinaDocks.length >= 2) {
-          const newDocks: DetectedDock[] = marinaDocks.map((d, idx) => {
-            const dpr = window.devicePixelRatio || 1;
-            const cssPx = d.x / dpr;
-            const cssPy = d.y / dpr;
-            const lngLat = map.unproject([cssPx, cssPy]);
-            const dockWidthM = (d.w / dpr) * 0.1;
-            const slipCount = Math.max(2, Math.round(d.w / (dpr * 18)));
-            return {
-              id: genDockId(),
-              name: `Dock ${String.fromCharCode(65 + idx)}`,
-              lng: lngLat.lng, lat: lngLat.lat,
-              width: dockWidthM, height: 8,
-              color: DOCK_COLORS[idx % DOCK_COLORS.length],
-              slipCount, slipLength: 40, slipWidth: 14,
-              dailyRate: 3.5 + idx * 0.5, monthlyRate: 75 + idx * 10,
-              confidence: 0.9, slipStatuses: generateSlipStatuses(slipCount),
-            };
-          });
-
-          setDocks(newDocks);
-          toast.success(`Detected ${newDocks.length} docks`);
-          setIsDetecting(false);
-          return;
-        }
-
-        // If no marina-sized docks found, fall through to generated layout
-      }
-
-      // Step 3: Generate a marina layout based on the viewport (always works)
-      toast.info("Generating marina layout from viewport...");
+      // Generate a marina layout filling the viewport
       const generated = generateMarinaLayout();
       if (generated.length >= 2) {
         setDocks(generated);
-        toast.success(`Generated ${generated.length} docks for your marina`);
-      } else {
-        toast.error("Could not generate marina layout. Try drawing manually.");
+        toast.success(`Created ${generated.length} docks`);
       }
     } catch (err) {
       console.error("Detection error:", err);
-      toast.error("Detection failed. Use Draw Dock to trace manually.");
     } finally {
       setIsDetecting(false);
     }
