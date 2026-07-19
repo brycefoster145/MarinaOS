@@ -16,6 +16,7 @@ interface DockInput {
   slipWidth: number;
   dailyRate: number;
   monthlyRate: number;
+  slipSizes?: { length: number; width: number }[];
 }
 
 export async function POST(req: NextRequest) {
@@ -56,23 +57,29 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // Create slips for this dock — spread along the dock in lat/lng space
+      // Create slips for this dock — spread along the dock in pixel coordinates
       const slipCount = Math.max(1, dockInput.slipCount);
       const slipsData = [];
-      const metersPerDegLng = 111320 * Math.cos((dockInput.lat * Math.PI) / 180);
 
       for (let s = 1; s <= slipCount; s++) {
         const slipNumber = `${dockName.charAt(0).toUpperCase()}-${s}`;
-        // Spread slips evenly along the dock's longitude range
-        const slipLng = dockInput.lng - (dockInput.width / 2) / metersPerDegLng + (s - 0.5) * (dockInput.width / slipCount) / metersPerDegLng;
+        // Use per-slip size if available, otherwise default
+        const slipSize = dockInput.slipSizes?.[s - 1];
+        const slipLength = slipSize?.length ?? dockInput.slipLength ?? 40;
+        const slipWidth = slipSize?.width ?? dockInput.slipWidth ?? 14;
+        // Pixel coordinates for the InteractiveSlipMap view
+        const slipWidthPx = 80;
+        const dockOffsetX = 40; // left margin
+        const slipPx = dockOffsetX + (s - 0.5) * slipWidthPx;
+        const dockY = i * 120; // 120px per dock row
 
         slipsData.push({
           organizationId,
           dockId: dock.id,
           name: slipNumber,
-          number: slipNumber,
-          length: dockInput.slipLength || 40,
-          width: dockInput.slipWidth || 14,
+          number: `${slipLength}'`,
+          length: slipLength,
+          width: slipWidth,
           hasPower: true,
           hasWater: true,
           hasWiFi: true,
@@ -80,8 +87,10 @@ export async function POST(req: NextRequest) {
           dailyRate: dockInput.dailyRate || 3.5,
           monthlyRate: dockInput.monthlyRate || 85,
           isActive: true,
-          positionX: slipLng,
-          positionY: dockInput.lat,
+          positionX: slipPx,
+          positionY: dockY,
+          widthPixels: slipWidthPx - 10,
+          heightPixels: 60,
         });
       }
 
