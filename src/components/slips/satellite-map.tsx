@@ -353,32 +353,27 @@ export function SatelliteDockDetection() {
     const ne = bounds.getNorthEast();
     const latSpan = Math.abs(ne.lat - sw.lat);
     const lngSpan = Math.abs(ne.lng - sw.lng);
-    const centerLat = (sw.lat + ne.lat) / 2;
 
-    // Calculate viewport size in meters
-    const metersPerDegLng = 111320 * Math.cos((centerLat * Math.PI) / 180);
-    const viewWidthM = lngSpan * metersPerDegLng;
-
-    // Aim for a dock every ~12 meters (40ft of water + dock width)
-    const dockSpacingM = 12;
-    const dockCount = Math.min(8, Math.max(2, Math.floor(viewWidthM / dockSpacingM)));
+    // Create parallel finger piers filling the viewport
+    // Aim for 3-10 docks depending on viewport width
+    const dockCount = Math.min(10, Math.max(3, Math.round(lngSpan / 0.0003)));
 
     const docks: DetectedDock[] = [];
-    // Dock length: 70% of viewport height, starting from top
-    const dockLengthDeg = latSpan * 0.7;
-    const dockLengthM = dockLengthDeg * 111320;
-    const slipCount = Math.max(2, Math.round(dockLengthM / 4.5 / 2) * 2);
+    // Leave 10% margin on each side
+    const margin = 0.1;
+    const usableLng = lngSpan * (1 - 2 * margin);
+    const startLng = sw.lng + lngSpan * margin;
+    const spacing = usableLng / dockCount;
 
-    // Spread docks evenly across the viewport with proper spacing
-    const totalWidth = dockCount * (dockSpacingM / metersPerDegLng);
-    const startLng = (sw.lng + ne.lng) / 2 - totalWidth / 2;
-    const spacing = dockSpacingM / metersPerDegLng;
-    // Top of the dock (slightly below the top edge of viewport)
-    const dockTopLat = ne.lat - latSpan * 0.05;
+    // Dock length: 60% of viewport height, centered
+    const dockLengthDeg = latSpan * 0.6;
+    const dockCenterLat = (sw.lat + ne.lat) / 2;
 
     for (let i = 0; i < dockCount; i++) {
-      const dockLng = startLng + spacing * i + spacing * 0.15;
-      const dockCenterLat = dockTopLat - dockLengthDeg / 2;
+      const dockLng = startLng + spacing * (i + 0.5);
+      const metersPerDegLng = 111320 * Math.cos((dockCenterLat * Math.PI) / 180);
+      const dockLengthM = dockLengthDeg * 111320;
+      const slipCount = Math.max(2, Math.round(dockLengthM / 4.5 / 2) * 2);
 
       docks.push({
         id: genDockId(),
