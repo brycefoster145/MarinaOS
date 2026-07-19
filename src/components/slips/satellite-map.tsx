@@ -577,23 +577,44 @@ export function SatelliteDockDetection() {
       const detected = detectDocksFromCanvas(canvas);
       const rect = container.getBoundingClientRect();
 
-      if (detected.length >= 2) {
-        const newDocks: DetectedDock[] = detected.map((d, idx) => {
-          // Convert canvas pixel coords to CSS pixel coords for map.unproject
-          const dpr = window.devicePixelRatio || 1;
+      // Deduplicate: merge regions that are close together
+      const deduped: typeof detected = [];
+      for (const d of detected) {
+        let isDuplicate = false;
+        for (const existing of deduped) {
+          const dist = Math.sqrt((d.x - existing.x) ** 2 + (d.y - existing.y) ** 2);
+          if (dist < Math.min(d.w, existing.w) * 0.5) {
+            isDuplicate = true;
+            break;
+          }
+        }
+        if (!isDuplicate) {
+          deduped.push(d);
+        }
+      }
+
+      if (deduped.length >= 2) {
+        const dpr = window.devicePixelRatio || 1;
+        // Sort by y position (top to bottom) for consistent lettering
+        deduped.sort((a, b) => a.y - b.y);
+        const newDocks: DetectedDock[] = deduped.map((d, idx) => {
           const cssPx = d.x / dpr;
           const cssPy = d.y / dpr;
           const lngLat = map.unproject([cssPx, cssPy]);
 
-          const dockWidthM = (d.w / dpr) * 0.1; // Rough meter estimate
-          const slipCount = Math.max(2, Math.round(d.w / (dpr * 18)));
+          // Calculate actual dock length in meters from the detected region
+          const centerLat = lngLat.lat;
+          const metersPerDegLng = 111320 * Math.cos((centerLat * Math.PI) / 180);
+          const dockLengthM = Math.max(10, (d.w / dpr) * 0.15);
+          // Slip every ~15ft (4.5m)
+          const slipCount = Math.max(2, Math.round(dockLengthM / 4.5));
 
           return {
             id: genDockId(),
             name: `Dock ${String.fromCharCode(65 + idx)}`,
             lng: lngLat.lng,
             lat: lngLat.lat,
-            width: dockWidthM,
+            width: dockLengthM,
             height: 8,
             color: DOCK_COLORS[idx % DOCK_COLORS.length],
             slipCount,
