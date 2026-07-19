@@ -67,11 +67,10 @@ export async function POST(req: NextRequest) {
         const slipSize = dockInput.slipSizes?.[s - 1];
         const slipLength = slipSize?.length ?? dockInput.slipLength ?? 40;
         const slipWidth = slipSize?.width ?? dockInput.slipWidth ?? 14;
-        // Pixel coordinates for the InteractiveSlipMap view
-        const slipWidthPx = 80;
-        const dockOffsetX = 40; // left margin
-        const slipPx = dockOffsetX + (s - 0.5) * slipWidthPx;
-        const dockY = i * 120; // 120px per dock row
+        // Pixel coordinates for the InteractiveSlipMap finger pier layout
+        // Each dock row: dockY = dockIndex * 120 + 20
+        // Each slip: slipX = 60 + (slipIndex - 1) * 18
+        const slipPx = 60 + (s - 1) * 18;
 
         slipsData.push({
           organizationId,
@@ -88,9 +87,9 @@ export async function POST(req: NextRequest) {
           monthlyRate: dockInput.monthlyRate || 85,
           isActive: true,
           positionX: slipPx,
-          positionY: dockY,
-          widthPixels: slipWidthPx - 10,
-          heightPixels: 60,
+          positionY: 0, // will be computed by dock index in the map
+          widthPixels: 12,
+          heightPixels: 48,
         });
       }
 

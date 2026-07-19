@@ -4,7 +4,6 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { GlassCard } from "@/components/ui/glass-card";
 import { Badge } from "@/components/ui/badge";
-import { Tooltip } from "@/components/ui/tooltip";
 import { Ship, Anchor, Zap, Waves, Wifi, Cable, ParkingCircle } from "lucide-react";
 
 type SlipStatus = "AVAILABLE" | "OCCUPIED" | "RESERVED" | "MAINTENANCE" | "UNAVAILABLE";
@@ -54,117 +53,133 @@ interface InteractiveSlipMapProps {
 export function InteractiveSlipMap({ docks, onSlipClick, selectedSlipId }: InteractiveSlipMapProps) {
   const [hoveredSlip, setHoveredSlip] = useState<SlipData | null>(null);
 
+  const FINGER_HEIGHT = 48;
+  const FINGER_WIDTH = 12;
+  const FINGER_GAP = 6;
+  const WALKWAY_HEIGHT = 8;
+  const PADDING = 60;
+
   // Calculate map dimensions
-  const maxX = Math.max(...docks.flatMap(d => d.slips.map(s => s.positionX || 0)), 800);
-  const maxY = Math.max(...docks.flatMap(d => d.slips.map(s => s.positionY || 0)), 400);
+  const maxX = Math.max(...docks.flatMap(d => d.slips.map((s, i) => (s.positionX || 0) + i * (FINGER_WIDTH + FINGER_GAP))), 800);
+  const maxY = Math.max(...docks.map((d, i) => i * 120 + 100), 400);
 
   return (
     <div className="relative overflow-x-auto">
-      <div className="relative" style={{ minWidth: `${maxX + 200}px`, minHeight: `${maxY + 150}px` }}>
-        {/* Water background */}
-        <div className="absolute inset-0 bg-gradient-to-b from-blue-500/5 via-blue-400/5 to-blue-600/5 rounded-2xl" />
+      <div className="relative" style={{ minWidth: `${maxX + PADDING * 2}px`, minHeight: `${maxY + PADDING}px` }}>
+        {/* Water background with subtle grid */}
+        <div className="absolute inset-0 rounded-2xl" style={{
+          background: "linear-gradient(180deg, rgba(6,78,120,0.08) 0%, rgba(2,136,209,0.04) 50%, rgba(6,78,120,0.08) 100%)",
+          backgroundImage: `linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px)`,
+          backgroundSize: "40px 40px",
+        }} />
 
         {/* Docks and slips */}
-        {docks.map((dock) => (
-          <div key={dock.id}>
-            {/* Dock label */}
-            <div
-              className="absolute flex items-center gap-2 px-3 py-1.5 rounded-lg bg-background/80 backdrop-blur-sm border border-border text-sm font-medium z-10"
-              style={{
-                left: `${(dock.slips[0]?.positionX || 0)}px`,
-                top: `${Math.max(0, (dock.slips[0]?.positionY || 0) - 32)}px`,
-              }}
-            >
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: dock.color }} />
-              {dock.name}
-              <span className="text-muted-foreground text-xs">
-                {dock.slips.filter(s => s.status === "AVAILABLE").length}/{dock.slips.length}
-              </span>
-            </div>
+        {docks.map((dock, dockIdx) => {
+          const dockY = dockIdx * 120 + 20;
+          const dockX = PADDING;
+          const totalWidth = dock.slips.length * (FINGER_WIDTH + FINGER_GAP);
 
-            {/* Dock line */}
-            <div
-              className="absolute h-0.5 rounded-full opacity-40"
-              style={{
-                left: `${dock.slips[0]?.positionX || 0}px`,
-                top: `${(dock.slips[0]?.positionY || 0) + 20}px`,
-                width: `${dock.slips.length * 90}px`,
-                backgroundColor: dock.color,
-              }}
-            />
+          return (
+            <div key={dock.id}>
+              {/* Dock walkway */}
+              <div
+                className="absolute rounded-full"
+                style={{
+                  left: `${dockX}px`,
+                  top: `${dockY + FINGER_HEIGHT + 4}px`,
+                  width: `${Math.max(totalWidth, 40)}px`,
+                  height: `${WALKWAY_HEIGHT}px`,
+                  backgroundColor: dock.color,
+                  opacity: 0.8,
+                  boxShadow: `0 0 8px ${dock.color}40`,
+                }}
+              />
 
-            {/* Slips */}
-            {dock.slips.map((slip) => {
-              const colors = statusColors[slip.status];
-              const isSelected = selectedSlipId === slip.id;
-              const isHovered = hoveredSlip?.id === slip.id;
+              {/* Dock label */}
+              <div
+                className="absolute flex items-center gap-2 px-2.5 py-1 rounded-lg bg-background/90 backdrop-blur-sm border border-border/50 text-xs font-medium z-10 shadow-sm"
+                style={{
+                  left: `${dockX}px`,
+                  top: `${dockY + FINGER_HEIGHT - 2}px`,
+                  transform: "translateY(-100%)",
+                }}
+              >
+                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dock.color }} />
+                <span>{dock.name}</span>
+                <span className="text-muted-foreground text-[10px]">
+                  {dock.slips.filter(s => s.status === "AVAILABLE").length}/{dock.slips.length}
+                </span>
+              </div>
 
-              return (
-                <div key={slip.id} className="absolute" style={{
-                  left: `${slip.positionX || 0}px`,
-                  top: `${slip.positionY || 0}px`,
-                }}>
-                  {isHovered && (
-                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50">
-                      <GlassCard className="p-3 min-w-[180px] text-xs shadow-xl" hover={false}>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="font-semibold text-sm">{slip.name}</span>
-                          <Badge variant={
-                            slip.status === "AVAILABLE" ? "success" :
-                            slip.status === "OCCUPIED" ? "info" :
-                            slip.status === "RESERVED" ? "warning" :
-                            "danger"
-                          } className="text-[10px]">
-                            {colors.label}
-                          </Badge>
-                        </div>
-                        <div className="space-y-1 text-muted-foreground">
-                          <p>{slip.length}&apos; × {slip.width || "—"}&apos;</p>
-                          <p>Max draft: {slip.maxDraft || "—"}&apos;</p>
-                          <div className="flex gap-2 mt-1">
-                            {slip.hasPower && <Zap className="h-3 w-3 text-yellow-400" />}
-                            {slip.hasWater && <Waves className="h-3 w-3 text-blue-400" />}
-                            {slip.hasWiFi && <Wifi className="h-3 w-3 text-green-400" />}
-                            {slip.hasCable && <Cable className="h-3 w-3 text-orange-400" />}
+              {/* Finger piers (slips) extending upward from walkway */}
+              {dock.slips.map((slip, idx) => {
+                const colors = statusColors[slip.status];
+                const isSelected = selectedSlipId === slip.id;
+                const isHovered = hoveredSlip?.id === slip.id;
+                const slipX = dockX + idx * (FINGER_WIDTH + FINGER_GAP) + 1;
+
+                return (
+                  <div key={slip.id} className="absolute" style={{
+                    left: `${slipX}px`,
+                    top: `${dockY + 4}px`,
+                  }}>
+                    {/* Finger pier */}
+                    <button
+                      onClick={() => onSlipClick?.(slip)}
+                      onMouseEnter={() => setHoveredSlip(slip)}
+                      onMouseLeave={() => setHoveredSlip(null)}
+                      className={cn(
+                        "block rounded-sm border-2 transition-all duration-200 cursor-pointer",
+                        colors.border,
+                        isSelected && "ring-2 ring-primary ring-offset-1 ring-offset-background z-20 scale-110",
+                        isHovered && !isSelected && "z-20 shadow-lg",
+                      )}
+                      style={{
+                        width: `${FINGER_WIDTH}px`,
+                        height: `${FINGER_HEIGHT}px`,
+                        backgroundColor: colors.bg,
+                      }}
+                    >
+                      <span className={cn(
+                        "block text-[7px] font-bold leading-none text-center mt-1",
+                        colors.text
+                      )}>
+                        {slip.number?.replace("'", "") || idx + 1}
+                      </span>
+                    </button>
+
+                    {/* Hover tooltip */}
+                    {isHovered && (
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50" style={{ pointerEvents: "none" }}>
+                        <GlassCard className="p-2.5 min-w-[160px] text-xs shadow-xl" hover={false}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-semibold text-sm">{slip.name}</span>
+                            <Badge variant={
+                              slip.status === "AVAILABLE" ? "success" :
+                              slip.status === "OCCUPIED" ? "info" :
+                              slip.status === "RESERVED" ? "warning" : "danger"
+                            } className="text-[10px]">
+                              {colors.label}
+                            </Badge>
                           </div>
-                          {slip.dockName && (
-                            <p className="text-[10px] text-muted-foreground mt-1">Dock: {slip.dockName}</p>
-                          )}
-                        </div>
-                      </GlassCard>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={() => onSlipClick?.(slip)}
-                    onMouseEnter={() => setHoveredSlip(slip)}
-                    onMouseLeave={() => setHoveredSlip(null)}
-                    className={cn(
-                      "flex flex-col items-center justify-center rounded-lg border-2 transition-all duration-200 cursor-pointer",
-                      colors.bg,
-                      colors.border,
-                      isSelected && "ring-2 ring-primary ring-offset-2 ring-offset-background scale-110",
-                      isHovered && !isSelected && "scale-105 shadow-lg",
-                      "hover:shadow-md"
+                          <div className="space-y-0.5 text-muted-foreground">
+                            <p>{slip.length}&apos; x {slip.width || "—"}&apos; | Max draft: {slip.maxDraft || "—"}&apos;</p>
+                            <div className="flex gap-1.5 mt-1">
+                              {slip.hasPower && <Zap className="h-3 w-3 text-yellow-400" />}
+                              {slip.hasWater && <Waves className="h-3 w-3 text-blue-400" />}
+                              {slip.hasWiFi && <Wifi className="h-3 w-3 text-green-400" />}
+                              {slip.hasCable && <Cable className="h-3 w-3 text-orange-400" />}
+                            </div>
+                          </div>
+                        </GlassCard>
+                      </div>
                     )}
-                    style={{
-                      width: `${slip.widthPixels || 70}px`,
-                      height: `${slip.heightPixels || 32}px`,
-                      transform: slip.rotation ? `rotate(${slip.rotation}deg)` : undefined,
-                    }}
-                  >
-                    <span className={cn("text-[10px] font-bold leading-none", colors.text)}>
-                      {slip.name.split("-")[1]}
-                    </span>
-                    <span className="text-[8px] text-muted-foreground leading-none mt-0.5">
-                      {slip.length}&apos;
-                    </span>
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        ))}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
 
         {/* Empty state */}
         {docks.length === 0 && (
