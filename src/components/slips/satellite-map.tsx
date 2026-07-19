@@ -400,6 +400,7 @@ export function SatelliteDockDetection() {
   };
 
   // Canvas-based dock detection (no AI API needed)
+  // Simple grid-based dock detection from canvas
   const detectDocksFromCanvas = (canvas: HTMLCanvasElement): { x: number; y: number; w: number; h: number }[] => {
     const ctx = canvas.getContext("2d");
     if (!ctx) return [];
@@ -408,169 +409,130 @@ export function SatelliteDockDetection() {
     const h = canvas.height;
     const imageData = ctx.getImageData(0, 0, w, h);
     const data = imageData.data;
+    // Use a downsampled version for speed
+    const gridSize = 20;
+    const cellW = Math.max(1, Math.floor(w / gridSize));
+    const cellH = Math.max(1, Math.floor(h / gridSize));
 
-    // Convert to grayscale and find bright pixels (dock surfaces)
-    const gray = new Uint8Array(w * h);
-    for (let i = 0; i < w * h; i++) {
-      const idx = i * 4;
-      // Luminosity formula
-      gray[i] = Math.round(data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114);
-    }
-
-    // Calculate average brightness to determine adaptive threshold
-    let sum = 0;
-    for (let i = 0; i < gray.length; i++) sum += gray[i];
-    const avg = sum / gray.length;
-    // Docks are bright structures - threshold at avg + 20 (or 140, whichever is higher)
-    const threshold = Math.max(avg + 25, 140);
-
-    // Binary image: 1 = bright (potential dock), 0 = dark (water)
-    const binary = new Uint8Array(w * h);
-    for (let i = 0; i < w * h; i++) {
-      binary[i] = gray[i] > threshold ? 1 : 0;
-    }
-
-    // Find horizontal bright line segments (docks are horizontal structures)
-    // Scan each row for runs of bright pixels
-    const minDockLength = Math.round(w * 0.06); // At least 6% of image width
-    const maxGap = Math.round(w * 0.01); // Max gap between bright segments to merge
-
-    // Collect horizontal segments
-    const segments: { row: number; colStart: number; colEnd: number }[] = [];
-
-    for (let row = 0; row < h; row++) {
-      let col = 0;
-      while (col < w) {
-        // Skip dark pixels
-        while (col < w && binary[row * w + col] === 0) col++;
-        if (col >= w) break;
-
-        // Found start of bright run
-        const start = col;
-        while (col < w && binary[row * w + col] === 1) col++;
-        const end = col - 1;
-        const length = end - start + 1;
-
-        if (length >= minDockLength) {
-          segments.push({ row, colStart: start, colEnd: end });
+    // Calculate average brightness for each grid cell
+    const grid: number[] = [];
+    for (let gy = 0; gy < gridSize; gy++) {
+      for (let gx = 0; gx < gridSize; gx++) {
+        let sum = 0, count = 0;
+        for (let py = gy * cellH; py < (gy + 1) * cellH && py < h; py++) {
+          for (let px = gx * cellW; px < (gx + 1) * cellW && px < w; px++) {
+            const idx = (py * w + px) * 4;
+            sum += data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
+            count++;
+          }
         }
+        grid.push(count > 0 ? sum / count : 0);
       }
     }
 
-    // Group segments into dock rectangles
-    // Two segments are in the same dock if they overlap horizontally and are close vertically
+    // Find the water brightness level (most common dark value)
+    const sorted = [...grid].sort((a, b) => a - b);
+    const waterBrightness = sorted[Math.floor(sorted.length * 0.4)]; // 40th percentile
+
+    // A dock cell is one that's significantly brighter than water
+    const threshold = waterBrightness + 30;
+    const dockCells = grid.map((v) => v > threshold ? 1 : 0);
+
+    // Find horizontal dock strips (rows of bright cells)
     const dockRegions: { x: number; y: number; w: number; h: number }[] = [];
-    const used = new Set<number>();
+    const visited = new Set<number>();
 
-    for (let i = 0; i < segments.length; i++) {
-      if (used.has(i)) continue;
+    for (let gy = 0; gy < gridSize; gy++) {
+      for (let gx = 0; gx < gridSize; gx++) {
+        const idx = gy * gridSize + gx;
+        if (dockCells[idx] !== 1 || visited.has(idx)) continue;
 
-      let minRow = segments[i].row;
-      let maxRow = segments[i].row;
-      let minCol = segments[i].colStart;
-      let maxCol = segments[i].colEnd;
-      used.add(i);
+        // Found a dock cell — expand horizontally
+        let minX = gx, maxX = gx;
+        let minY = gy, maxY = gy;
+        visited.add(idx);
 
-      // Look for adjacent rows that overlap
-      let changed = true;
-      while (changed) {
-        changed = false;
-        for (let j = 0; j < segments.length; j++) {
-          if (used.has(j)) continue;
-          const s = segments[j];
-          // Check if close vertically (within 8 rows) and overlapping horizontally
-          if (s.row >= minRow - 8 && s.row <= maxRow + 8) {
-            const overlap = Math.min(maxCol, s.colEnd) - Math.max(minCol, s.colStart);
-            if (overlap > 0) {
-              minRow = Math.min(minRow, s.row);
-              maxRow = Math.max(maxRow, s.row);
-              minCol = Math.min(minCol, s.colStart);
-              maxCol = Math.max(maxCol, s.colEnd);
-              used.add(j);
-              changed = true;
-            }
+        // Expand right
+        for (let ex = gx + 1; ex < gridSize; ex++) {
+          const eidx = gy * gridSize + ex;
+          if (dockCells[eidx] === 1) {
+            maxX = ex;
+            visited.add(eidx);
+          } else break;
+        }
+
+        // Expand down
+        for (let ey = gy + 1; ey < gridSize; ey++) {
+          let allBright = true;
+          for (let ex = minX; ex <= maxX; ex++) {
+            const eidx = ey * gridSize + ex;
+            if (dockCells[eidx] !== 1) { allBright = false; break; }
           }
+          if (allBright) {
+            maxY = ey;
+            for (let ex = minX; ex <= maxX; ex++) visited.add(ey * gridSize + ex);
+          } else break;
         }
-      }
 
-      const dockW = maxCol - minCol + 1;
-      const dockH = maxRow - minRow + 1;
-      // Filter out very small or very square regions (docks are long and thin)
-      if (dockW > minDockLength && dockH < dockW * 0.3 && dockH > 3) {
-        dockRegions.push({
-          x: minCol + (maxCol - minCol) / 2,
-          y: minRow + (maxRow - minRow) / 2,
-          w: dockW,
-          h: dockH,
-        });
-      }
-    }
-
-    // Also scan for vertical docks (perpendicular to main docks)
-    // Find vertical bright line segments
-    const verticalSegments: { col: number; rowStart: number; rowEnd: number }[] = [];
-    for (let col = 0; col < w; col++) {
-      let row = 0;
-      while (row < h) {
-        while (row < h && binary[row * w + col] === 0) row++;
-        if (row >= h) break;
-        const start = row;
-        while (row < h && binary[row * w + col] === 1) row++;
-        const end = row - 1;
-        const length = end - start + 1;
-        // Vertical docks: shorter segments, at least 20px
-        if (length >= 20) {
-          verticalSegments.push({ col, rowStart: start, rowEnd: end });
+        const regionW = (maxX - minX + 1) * cellW;
+        const regionH = (maxY - minY + 1) * cellH;
+        // Filter: docks are long and thin (width > 2x height)
+        if (regionW > regionH * 2 && regionW > cellW * 2) {
+          dockRegions.push({
+            x: (minX + maxX) / 2 * cellW + cellW / 2,
+            y: (minY + maxY) / 2 * cellH + cellH / 2,
+            w: regionW,
+            h: regionH,
+          });
         }
       }
     }
 
-    // Group vertical segments
-    const vUsed = new Set<number>();
-    for (let i = 0; i < verticalSegments.length; i++) {
-      if (vUsed.has(i)) continue;
+    // Also find vertical docks
+    for (let gx = 0; gx < gridSize; gx++) {
+      for (let gy = 0; gy < gridSize; gy++) {
+        const idx = gy * gridSize + gx;
+        if (dockCells[idx] !== 1 || visited.has(idx)) continue;
 
-      let minCol = verticalSegments[i].col;
-      let maxCol = verticalSegments[i].col;
-      let minRow = verticalSegments[i].rowStart;
-      let maxRow = verticalSegments[i].rowEnd;
-      vUsed.add(i);
+        let minY = gy, maxY = gy;
+        visited.add(idx);
 
-      let changed = true;
-      while (changed) {
-        changed = false;
-        for (let j = 0; j < verticalSegments.length; j++) {
-          if (vUsed.has(j)) continue;
-          const s = verticalSegments[j];
-          if (s.col >= minCol - 8 && s.col <= maxCol + 8) {
-            const overlap = Math.min(maxRow, s.rowEnd) - Math.max(minRow, s.rowStart);
-            if (overlap > 0) {
-              minCol = Math.min(minCol, s.col);
-              maxCol = Math.max(maxCol, s.col);
-              minRow = Math.min(minRow, s.rowStart);
-              maxRow = Math.max(maxRow, s.rowEnd);
-              vUsed.add(j);
-              changed = true;
-            }
+        // Expand down
+        for (let ey = gy + 1; ey < gridSize; ey++) {
+          const eidx = ey * gridSize + gx;
+          if (dockCells[eidx] === 1) {
+            maxY = ey;
+            visited.add(eidx);
+          } else break;
+        }
+
+        // Expand right
+        for (let ex = gx + 1; ex < gridSize; ex++) {
+          let allBright = true;
+          for (let ey = minY; ey <= maxY; ey++) {
+            const eidx = ey * gridSize + ex;
+            if (dockCells[eidx] !== 1) { allBright = false; break; }
           }
+          if (allBright) {
+            for (let ey = minY; ey <= maxY; ey++) visited.add(ey * gridSize + ex);
+          } else break;
         }
-      }
 
-      const dockW = maxCol - minCol + 1;
-      const dockH = maxRow - minRow + 1;
-      if (dockH > 40 && dockW < dockH * 0.3) {
-        dockRegions.push({
-          x: minCol + (maxCol - minCol) / 2,
-          y: minRow + (maxRow - minRow) / 2,
-          w: dockW,
-          h: dockH,
-        });
+        const regionW = cellW;
+        const regionH = (maxY - minY + 1) * cellH;
+        if (regionH > regionW * 2 && regionH > cellH * 2) {
+          dockRegions.push({
+            x: gx * cellW + cellW / 2,
+            y: (minY + maxY) / 2 * cellH + cellH / 2,
+            w: regionW,
+            h: regionH,
+          });
+        }
       }
     }
 
-    // Sort by y position (top to bottom)
+    // Sort by y position
     dockRegions.sort((a, b) => a.y - b.y);
-
     return dockRegions;
   };
 
